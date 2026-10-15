@@ -262,7 +262,7 @@ public class HealthConnectPlugin extends Plugin {
                         JSObject r = new JSObject();
                         r.put("id", m.getId());
                         r.put("time", w.getTime().toEpochMilli());
-                        r.put("kg", w.getWeight().getInKilograms());
+                        r.put("kg", w.getWeight().getKilograms());
                         r.put("origin", origin);
                         if (clientId != null) r.put("clientRecordId", clientId);
                         out.put(r);
