@@ -306,7 +306,7 @@ function BwSheet({ required, onDone, close }) {
       const ex = s.bodyweight.find(b => b.d === iso)
       // Typed here, it is the user's own: one imported from Health Connect (#544) becomes theirs,
       // and an import never replaces it again.
-      if (ex) { ex.w = n; ex.t = Date.now(); delete ex.src } else s.bodyweight.push({ d: iso, w: n, t: Date.now() })
+      if (ex) { ex.w = n; ex.t = Date.now(); delete ex.src; delete ex.ht } else s.bodyweight.push({ d: iso, w: n, t: Date.now() })
       s.bodyweight.sort((a, b) => (a.d < b.d ? -1 : 1))
     })
     close()

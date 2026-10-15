@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { bwSheet, goalSheet } from './sheets.jsx'
+import { todayISO } from './lib/format.js'
 
 // The big weight read-out (body weight, goal, top weight after an exercise) used to be text:
 // the only ways to a number were the slider, ±0.1 and the ±0.5/±1 chips, so 72.3 → 85.7 was a
@@ -65,6 +66,14 @@ describe('weight read-out is a typable field', () => {
     act(() => type(input, '82,5'))
     expect(input.value).toBe('82.5')
     expect(slider.getAttribute('aria-valuenow')).toBe('82.5')
+  })
+
+  it('typing over a weigh-in imported from Health Connect makes it the user’s own (#544)', () => {
+    useStore.setState(s => ({ S: { ...s.S, bodyweight: [{ d: todayISO(), w: 80.4, t: 5, ht: 4, src: 'hc' }] } }))
+    const { input, button } = renderBw()
+    act(() => type(input, '82'))
+    act(() => button('Save').click())
+    expect(useStore.getState().S.bodyweight).toEqual([{ d: todayISO(), w: 82, t: expect.any(Number) }])
   })
 
   it('steps on from the typed value and saves what ends up on screen', () => {

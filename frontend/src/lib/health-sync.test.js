@@ -265,14 +265,18 @@ describe('reading weigh-ins', () => {
     expect(S.bodyweight).toEqual(stored)
   })
 
-  it('a read cut short keeps the last read time, so the next one starts there again', async () => {
+  it('a read cut short counts up to the newest reading it got, so the next one moves on', async () => {
     startStore(state([]))
     await hs.enableHealthRead()
-    const readAt = file().readAt
     vi.setSystemTime(at(21, 9))
     h.truncated = true
+    h.records = [rec(18, 7, 80.4), rec(19, 7, 80.2)]
     await hs.importHealth()
-    expect(file().readAt).toBe(readAt)
+    expect(file().readAt).toBe(at(19, 7))
+    h.records = []
+    await hs.importHealth()
+    expect(file().readAt).toBe(at(19, 7))   // cut short with nothing returned: stays where it was
+    h.records = [rec(18, 7, 80.4), rec(19, 7, 80.2)]
     h.truncated = false
     await hs.importHealth()
     expect(file().readAt).toBe(at(21, 9))

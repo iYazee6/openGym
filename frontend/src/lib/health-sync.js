@@ -214,9 +214,11 @@ export function importHealth() {
           updated = r.updated
         })
       }
-      // A read cut short (more pages than the plugin goes through at once) keeps its last
-      // read time, so the next read starts where this one did and nothing is skipped for good.
-      out = { ...(await loadHealth()), readAt: res?.truncated ? h.readAt : now, readError: null }
+      // A read cut short (more pages than the plugin goes through at once) counts only up to the
+      // newest reading it got: the next read goes on from there, and nothing after it is skipped.
+      const newest = records.reduce((m, r) => Math.max(m, Number(r?.time) || 0), 0)
+      const readAt = res?.truncated ? (newest > 0 ? newest : h.readAt) : now
+      out = { ...(await loadHealth()), readAt, readError: null }
     } catch (e) {
       out = { ...(await loadHealth()), readError: e?.code === 'permission' ? 'permission' : e?.code === 'unavailable' ? 'unavailable' : 'failed' }
     }
