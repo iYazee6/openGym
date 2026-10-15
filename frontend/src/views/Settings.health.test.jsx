@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => {
   })
   state.enableHealth = vi.fn(async () => { state.health = { ...state.health, on: true }; return { ok: true, health: state.health } })
   state.disableHealth = vi.fn(async ({ removeWritten }) => { state.health = { ...state.health, on: false, written: removeWritten ? {} : state.health.written }; return state.health })
+  state.enableHealthRead = vi.fn(async () => { state.health = { ...state.health, readOn: true }; return { ok: true, health: state.health, added: 3, updated: 0 } })
+  state.disableHealthRead = vi.fn(async () => { state.health = { ...state.health, readOn: false, readAt: 0 }; return state.health })
   state.openHealthConnect = vi.fn(async () => {})
   state.menuSheet = vi.fn()
   state.toast = vi.fn()
@@ -49,6 +51,8 @@ vi.mock('../lib/health-sync.js', () => ({
   loadHealth: () => Promise.resolve(mocks.health),
   enableHealth: (...a) => mocks.enableHealth(...a),
   disableHealth: (...a) => mocks.disableHealth(...a),
+  enableHealthRead: (...a) => mocks.enableHealthRead(...a),
+  disableHealthRead: (...a) => mocks.disableHealthRead(...a),
   openHealthConnect: (...a) => mocks.openHealthConnect(...a),
   onHealthChange: () => () => {},
 }))
@@ -67,7 +71,7 @@ beforeEach(() => {
   mocks.android = true
   mocks.status = { status: 'available', granted: false }
   mocks.health = { on: false, written: {}, error: null }
-  for (const k of ['enableHealth', 'disableHealth', 'openHealthConnect', 'menuSheet', 'toast']) mocks[k].mockClear()
+  for (const k of ['enableHealth', 'disableHealth', 'enableHealthRead', 'disableHealthRead', 'openHealthConnect', 'menuSheet', 'toast']) mocks[k].mockClear()
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -83,6 +87,8 @@ const mount = async () => {
 }
 const row = text => [...host.querySelectorAll('.lrow')].find(r => r.textContent.includes(text))
 const writeSwitch = () => row('Write to Health Connect')?.querySelector('[role="switch"]')
+const readSwitch = () => row('Import weigh-ins from Health Connect')?.querySelector('[role="switch"]')
+const footer = () => host.textContent
 
 describe('Settings — Health Connect', () => {
   it('is not there on the web build, on iOS, or on a phone without Health Connect', async () => {
@@ -129,10 +135,63 @@ describe('Settings — Health Connect', () => {
     expect(mocks.enableHealth).toHaveBeenCalledTimes(1)
   })
 
+  // #544: reading weigh-ins other apps saved there, a switch of its own beside the writing.
+  it('the import starts off, and turning it on goes through enableHealthRead alone', async () => {
+    await mount()
+    expect(readSwitch().getAttribute('aria-checked')).toBe('false')
+    await act(async () => { readSwitch().click() })
+    expect(mocks.enableHealthRead).toHaveBeenCalledTimes(1)
+    expect(mocks.enableHealth).not.toHaveBeenCalled()
+    expect(readSwitch().getAttribute('aria-checked')).toBe('true')
+    expect(writeSwitch().getAttribute('aria-checked')).toBe('false')
+    expect(row('Open Health Connect')).toBeTruthy()
+    expect(mocks.toast).toHaveBeenCalledWith('Importing weigh-ins from Health Connect')
+  })
+
+  it('says when the read permission was not granted', async () => {
+    mocks.enableHealthRead.mockImplementationOnce(async () => ({ ok: false, reason: 'denied' }))
+    await mount()
+    await act(async () => { readSwitch().click() })
+    expect(readSwitch().getAttribute('aria-checked')).toBe('false')
+    expect(mocks.toast).toHaveBeenCalledWith('Health Connect permission not granted')
+  })
+
+  it('turning the import off asks nothing and keeps the writing as it is', async () => {
+    mocks.health = { on: true, written: {}, error: null, readOn: true }
+    await mount()
+    await act(async () => { readSwitch().click() })
+    expect(mocks.disableHealthRead).toHaveBeenCalledTimes(1)
+    expect(mocks.menuSheet).not.toHaveBeenCalled()
+    expect(readSwitch().getAttribute('aria-checked')).toBe('false')
+    expect(writeSwitch().getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('the footer says nothing is read while the import is off', async () => {
+    mocks.health = { on: true, written: {}, error: null, readOn: false }
+    await mount()
+    expect(footer()).toContain('openGym reads nothing back.')
+  })
+
+  it('and says what is read once it is on', async () => {
+    mocks.health = { on: true, written: {}, error: null, readOn: true }
+    await mount()
+    expect(footer()).not.toContain('reads nothing back')
+    expect(footer()).toContain('A weigh-in you entered in openGym is never replaced.')
+  })
+
+  it('offers to grant the read permission again when Health Connect refused it', async () => {
+    mocks.health = { on: false, written: {}, error: null, readOn: true, readError: 'permission' }
+    await mount()
+    await act(async () => { row('Permission withdrawn').click() })
+    expect(mocks.enableHealthRead).toHaveBeenCalledTimes(1)
+    expect(mocks.enableHealth).not.toHaveBeenCalled()
+  })
+
   it('points to installing Health Connect where it is an app of its own', async () => {
     mocks.status = { status: 'missing', granted: false }
     await mount()
     expect(writeSwitch()).toBeUndefined()
+    expect(readSwitch()).toBeUndefined()
     await act(async () => { row('Install Health Connect').click() })
     expect(mocks.openHealthConnect).toHaveBeenCalledTimes(1)
   })

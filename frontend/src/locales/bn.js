@@ -2181,6 +2181,12 @@ export default {
   'Stop, keep what it wrote': 'বন্ধ করুন, যা লেখা হয়েছে রেখে দিন',
   'Stop and remove what it wrote': 'বন্ধ করুন আর যা লেখা হয়েছে সরিয়ে দিন',
   'Could not remove it from Health Connect': 'Health Connect থেকে সরানো যায়নি',
+  'Import weigh-ins from Health Connect': 'Health Connect থেকে ওজন মাপা আনুন',
+  'From a smart scale or another app, into your body weight log.': 'স্মার্ট স্কেল বা অন্য অ্যাপ থেকে, আপনার শরীরের ওজনের লগে।',
+  'Workouts and weigh-ins go to Health Connect when you finish or change them.': 'ওয়ার্কআউট আর ওজন মাপা শেষ করলে বা বদলালে Health Connect-এ যায়।',
+  'Weigh-ins other apps save there join your body weight log, the earliest of each day. A weigh-in you entered in openGym is never replaced.': 'অন্য অ্যাপ ওখানে যে ওজন মাপা রাখে তা আপনার শরীরের ওজনের লগে যোগ হয়, প্রতিদিনের সবচেয়ে আগেরটি। openGym-এ আপনার নিজের লেখা ওজন কখনও বদলানো হয় না।',
+  'Importing weigh-ins from Health Connect': 'Health Connect থেকে ওজন মাপা আনা হচ্ছে',
+  'Could not read from Health Connect': 'Health Connect থেকে পড়া যায়নি',
   // --- finish summary: last time and next time ---
   'Details': 'বিস্তারিত',
   'Progression settings': 'প্রগ্রেশন সেটিংস',

@@ -1268,6 +1268,12 @@ export const PT_BR_OVERRIDES = {
   'Stop, keep what it wrote': 'Parar e manter o que gravou',
   'Stop and remove what it wrote': 'Parar e remover o que gravou',
   'Could not remove it from Health Connect': 'Não foi possível remover do Conexão Saúde',
+  'Import weigh-ins from Health Connect': 'Importar pesagens do Conexão Saúde',
+  'From a smart scale or another app, into your body weight log.': 'De uma balança inteligente ou outro app, para o seu registro de peso corporal.',
+  'Workouts and weigh-ins go to Health Connect when you finish or change them.': 'Treinos e pesagens vão para o Conexão Saúde quando você os conclui ou altera.',
+  'Weigh-ins other apps save there join your body weight log, the earliest of each day. A weigh-in you entered in openGym is never replaced.': 'As pesagens que outros apps salvam lá entram no seu registro de peso corporal, a mais cedo de cada dia. Uma pesagem que você registrou no openGym nunca é substituída.',
+  'Importing weigh-ins from Health Connect': 'Importando pesagens do Conexão Saúde',
+  'Could not read from Health Connect': 'Não foi possível ler do Conexão Saúde',
   // --- v1.3.11 round 10-08: 1RM formula, supersets, measurements, Coach, pairing ---
   'e.g. “swap the squats for split squats, and Mondays are short”': 'ex.: “troque os agachamentos por afundos, e na segunda-feira o treino é curto”',
   'Added before your work sets and left out of volume, records and progression. Each one closes half the gap to the work weight, and you can still change any of them mid-session.': 'Feitas antes das suas séries de trabalho e fora do volume, dos recordes e da progressão. Cada uma fecha metade da distância até a carga de trabalho, e você ainda pode mudar qualquer uma no meio do treino.',

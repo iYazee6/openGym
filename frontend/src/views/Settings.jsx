@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, forwardRef, useSyncExternalStore } from 'react'
 import { useNavigate, useParams, useLocation, Navigate } from 'react-router-dom'
 import { useStore, DEF, hasData } from '../store/useStore.js'
-import { healthStatus, loadHealth, enableHealth, disableHealth, openHealthConnect, onHealthChange } from '../lib/health-sync.js'
+import { healthStatus, loadHealth, enableHealth, disableHealth, enableHealthRead, disableHealthRead, openHealthConnect, onHealthChange } from '../lib/health-sync.js'
 import { workoutControls } from '../lib/workout-controls.js'
 import { speedUnitOf } from '../lib/speed.js'
 import { formulaOf, FORMULA_NAMES } from '../lib/onerm.js'
@@ -1432,7 +1432,8 @@ function RegisterInline({ close, setUser, pushState, pullState, toast }) {
 // own store for health data, where other apps can read them. A fact about this phone, kept in
 // its own file (lib/health-sync.js) and not in S, so it never switches on anywhere else. The card
 // stays out of the way on a phone without Health Connect, and only points to installing it on
-// Android 13 and lower, where it is an app of its own.
+// Android 13 and lower, where it is an app of its own. Reading weigh-ins other apps saved there
+// into the body weight log (#544) is a second switch with its own permission.
 function HealthConnectCard({ S, toast }) {
   const [st, setSt] = useState(null)
   const [h, setH] = useState(null)
@@ -1472,6 +1473,22 @@ function HealthConnectCard({ S, toast }) {
     catch { toast(t('Could not remove it from Health Connect')) }
     setBusy(false)
   }
+  const readOn = async () => {
+    setBusy(true)
+    try {
+      const r = await enableHealthRead()
+      setH(r.health || await loadHealth())
+      if (r.ok) toast(t('Importing weigh-ins from Health Connect'))
+      else toast(r.reason === 'denied' ? t('Health Connect permission not granted') : t('Could not read from Health Connect'))
+    } catch { toast(t('Could not read from Health Connect')) }
+    setBusy(false)
+  }
+  // Off keeps what was imported: those weigh-ins are in the log now, like any other.
+  const readOff = async () => {
+    setBusy(true)
+    try { setH(await disableHealthRead()) } catch { /* stays as it was */ }
+    setBusy(false)
+  }
   // Off can mean two things for what is already there, so it asks; closing the sheet keeps it on.
   const askOff = () => menuSheet({
     title: t('Stop writing to Health Connect?'),
@@ -1482,16 +1499,28 @@ function HealthConnectCard({ S, toast }) {
     ],
   })
 
+  const footer = [
+    h.on && (h.readOn
+      ? t('Workouts and weigh-ins go to Health Connect when you finish or change them.')
+      : t('Workouts and weigh-ins go to Health Connect when you finish or change them. openGym reads nothing back.')),
+    h.readOn && t('Weigh-ins other apps save there join your body weight log, the earliest of each day. A weigh-in you entered in openGym is never replaced.'),
+  ].filter(Boolean).join(' ')
+
   return (
-    <Section title={t('Health Connect')}
-      footer={h.on ? t('Workouts and weigh-ins go to Health Connect when you finish or change them. openGym reads nothing back.') : null}>
+    <Section title={t('Health Connect')} footer={footer || null}>
       <Row icon="heart" iconTint="var(--red)" title={t('Write to Health Connect')}
         subtitle={t('Finished workouts and weigh-ins, from this phone only.')}>
         <Switch checked={!!h.on} disabled={busy} onChange={v => (v ? turnOn() : askOff())} />
       </Row>
       {h.on && h.error === 'permission' && <Row icon="warning" iconTint="var(--orange)"
         title={t('Permission withdrawn. Tap to allow again')} accessory="chevron" onClick={turnOn} />}
-      {h.on && <Row icon="list" iconTint="var(--blue)" title={t('Open Health Connect')}
+      <Row icon="scale" iconTint="var(--green)" title={t('Import weigh-ins from Health Connect')}
+        subtitle={t('From a smart scale or another app, into your body weight log.')}>
+        <Switch checked={!!h.readOn} disabled={busy} onChange={v => (v ? readOn() : readOff())} />
+      </Row>
+      {h.readOn && h.readError === 'permission' && <Row icon="warning" iconTint="var(--orange)"
+        title={t('Permission withdrawn. Tap to allow again')} accessory="chevron" onClick={readOn} />}
+      {(h.on || h.readOn) && <Row icon="list" iconTint="var(--blue)" title={t('Open Health Connect')}
         accessory="chevron" onClick={() => openHealthConnect().catch(() => {})} />}
     </Section>
   )

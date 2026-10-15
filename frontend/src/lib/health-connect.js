@@ -8,6 +8,7 @@
 import { workoutText } from './workout-text.js'
 import { modeForEntry, hasCompletedWork } from './workout-model.js'
 import { isoOf } from './format.js'
+import { isImported } from './health-import.js'
 
 const LB_PER_KG = 2.2046226218
 // Health Connect refuses a title or notes over 1000 characters (ExerciseSessionRecord).
@@ -80,12 +81,15 @@ function localMorning(iso) {
   return new Date(y, m - 1, d, 8, 0, 0, 0).getTime()
 }
 
-/** Everything the state has to give Health Connect: { sessions, weights }. */
+/**
+ * Everything the state has to give Health Connect: { sessions, weights }. A weigh-in read from
+ * Health Connect (#544) is not written back: it is there already, under the app that took it.
+ */
 export function healthRecords(S, { nameOf, speedUnit }) {
   const unit = S?.unit === 'lb' ? 'lb' : 'kg'
   return {
     sessions: (S?.workouts || []).map(w => sessionRecord(w, { unit, nameOf, speedUnit })).filter(Boolean),
-    weights: (S?.bodyweight || []).map(b => weightRecord(b, unit)).filter(Boolean),
+    weights: (S?.bodyweight || []).filter(b => !isImported(b)).map(b => weightRecord(b, unit)).filter(Boolean),
   }
 }
 

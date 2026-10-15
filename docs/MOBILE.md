@@ -181,8 +181,9 @@ plays; the zip export opens the share sheet.
 
 Settings → **Health Connect** writes finished workouts and weigh-ins to Health Connect, Android's
 on-device store for health data, where other apps (Google Fit, Samsung Health, a smartwatch app…)
-can read them. It is off until the user turns it on, and nothing is asked of Health Connect before
-that.
+can read them, and can read the weigh-ins those apps saved there into the body weight log. Each
+side is its own switch, off until the user turns it on, and nothing is asked of Health Connect
+before that.
 
 - **What is written:** each finished workout as an exercise session — its start and end, its name
   as the title, the exercises and sets as "Copy as text" writes them as the notes, and a type
@@ -191,19 +192,36 @@ that.
   Each weigh-in as a weight record, in kilograms. A workout without a real start and end is left
   out rather than given made-up times. `src/lib/health-connect.js` works this out; its tests
   pin it.
-- **Write-only.** The manifest declares `WRITE_EXERCISE` and `WRITE_WEIGHT` and nothing else, and
-  openGym reads nothing back.
+- **What is read (#544):** weigh-ins, and nothing else. The manifest declares `WRITE_EXERCISE`,
+  `WRITE_WEIGHT` and `READ_WEIGHT`; the read permission is asked for on its own, when the user
+  turns on "Import weigh-ins from Health Connect".
+- **How a reading becomes a weigh-in:** one per day, the earliest reading of the day, in the
+  profile's unit and marked as imported (`src: 'hc'`). A weigh-in typed in openGym is never
+  replaced; one typed over an imported day makes that day the user's own. A day removed in
+  openGym is not brought back. Imported weigh-ins go into the log through the store like any
+  other change, so they sync to a server and to other devices. `src/lib/health-import.js` works
+  this out; its tests pin it.
+- **No loop.** A record openGym wrote (its `clientRecordId` starts with `opengym-`, or its origin
+  is the app itself) is never read back, and an imported weigh-in is never written back to Health
+  Connect: it is there already, under the app that took it.
+- **When it reads:** once at launch, when the app comes back to the foreground, and on Sync now.
+  The first read reaches back a year (Health Connect itself answers only for the 30 days before
+  the permission was first granted, unless the app holds its history permission, which openGym
+  does not ask for); later ones from a week before the last read, since a scale or a watch often
+  syncs its reading in hours after it was taken. Edits and deletions made in another app are not
+  followed. Turning it off keeps what was imported.
 - **No duplicates.** Every record carries openGym's own id as its `clientRecordId`
   (`opengym-w-<workout id>`, `opengym-bw-<day>`), so writing it again replaces it. An edited workout
   or weigh-in is written again; a deleted one is removed from Health Connect.
-- **This phone only.** Whether it is on, and a fingerprint of each record already written, live in
-  `opengym-health.json` in the app's data directory, never in the synced state: it does not travel
-  to a server, into a backup export, or to a second phone. It works the same in local mode and
-  paired with a server, because the writing happens on the phone.
+- **This phone only.** Whether each side is on, when it last read, and a fingerprint of each record
+  already written, live in `opengym-health.json` in the app's data directory, never in the synced
+  state: it does not travel to a server, into a backup export, or to a second phone. It works the
+  same in local mode and paired with a server, because the writing and the reading happen on the
+  phone.
 - **When it writes:** after each save (finishing a workout, a weigh-in, an edit), when the app comes
   back to the foreground, and once at launch. While it is off, a save costs nothing: the file is
   read once at launch and kept in memory.
-- **Turning it off** asks whether to keep what openGym wrote in Health Connect, as the user's own
+- **Turning the writing off** asks whether to keep what openGym wrote in Health Connect, as the user's own
   data, or to remove exactly those records.
 - **Where it shows:** Android 14 and later have Health Connect built in. On Android 9–13 it is an
   app of its own, and the card offers its store page until it is installed. Below Android 9 (the
@@ -216,7 +234,10 @@ that.
 
 Worth checking on a real device after changes here: turning it on shows Health Connect's own
 permission screen; a finished workout appears in Health Connect within a few seconds; deleting it
-in openGym removes it there; turning it off with "remove" leaves no openGym record behind.
+in openGym removes it there; turning it off with "remove" leaves no openGym record behind; with
+the import on, a weigh-in saved in another app (Samsung Health, a scale's app) shows up in the
+body weight log after the app comes back to the foreground, and openGym's own weigh-ins do not
+come back twice.
 
 ## Prerequisites
 

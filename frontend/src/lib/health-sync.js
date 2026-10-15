@@ -6,15 +6,22 @@
 // data directory, never in S, so it does not sync to a server, ride in a backup, or switch on a
 // second phone. Off until the user turns it on; nothing is asked of Health Connect before that.
 //
+// The read side (#544) is its own switch: weigh-ins other apps saved to Health Connect are taken
+// into the body weight log (lib/health-import.js decides how). Off until the user turns it on, with
+// its own permission, asked only then.
+//
 // The web build never gets here (MOBILE is a build-time flag), and iOS answers 'unsupported'.
 import { MOBILE, isAndroid, readJsonFile, writeJsonFile } from './mobile.js'
 import { healthRecords, planSync, writtenIds } from './health-connect.js'
+import { mergeImportedWeights, readSince } from './health-import.js'
 import { exerciseNameFor } from './i18n-core.js'
 import { EXIDX } from './exercises.js'
 import { speedUnitOf } from './speed.js'
 
 export const HEALTH_FILE = 'opengym-health.json'
-const OFF = { on: false, written: {}, at: 0, error: null }
+// on/written/at/error: the write side. readOn/readAt/readError: the read side, readAt being when
+// the last read went through.
+const OFF = { on: false, written: {}, at: 0, error: null, readOn: false, readAt: 0, readError: null }
 
 // Wrapped in an object, as in rest-alert.js: a Capacitor plugin proxy answers `then`, so a
 // promise resolved with the bare proxy never settles.
@@ -36,7 +43,7 @@ export async function loadHealth() {
 }
 const saveHealth = h => { cached = h; return writeJsonFile(HEALTH_FILE, h) }
 
-/** { status: 'available' | 'update' | 'missing' | 'unsupported', granted } */
+/** { status: 'available' | 'update' | 'missing' | 'unsupported', granted, readGranted } */
 export async function healthStatus() {
   if (!MOBILE) return { status: 'unsupported', granted: false }
   try {
@@ -100,7 +107,7 @@ async function syncOnce(S, h) {
     // Nothing to write, but the last attempt failed: clear it once Health Connect says yes again.
     const st = await p.HC.status().catch(() => null)
     if (!(st?.status === 'available' && st.granted)) return h
-    const out = { ...h, error: null }
+    const out = { ...(await loadHealth()), error: null }
     await saveHealth(out)
     told(out)
     return out
@@ -118,6 +125,8 @@ async function syncOnce(S, h) {
   } catch (e) {
     out.error = e?.code === 'permission' ? 'permission' : e?.code === 'unavailable' ? 'unavailable' : 'failed'
   }
+  // Only the write side's own fields: a read that went through meanwhile keeps what it saved.
+  out = { ...(await loadHealth()), written: out.written, at: out.at, error: out.error }
   await saveHealth(out)
   told(out)
   return out
@@ -163,16 +172,109 @@ export async function disableHealth({ removeWritten = false } = {}) {
   return out
 }
 
+// ---- Reading weigh-ins (#544) ----------------------------------------------------------------
+
+// How the read side reaches the store: its state, and its own update path (useStore update), so an
+// imported weigh-in is stamped, saved, synced and merged like one typed in. Set by initHealthSync.
+let store = null
+
+let reading = null
+/**
+ * Reads the weigh-ins saved to Health Connect since the last read (the first time: the last
+ * year) and takes them into the log. A no-op while the read side is off. Resolves with
+ * { health, added, updated }: the file's content afterwards (`readError` says why a read
+ * failed: 'permission', 'unavailable' or 'failed'), and how many weigh-ins the log gained or had
+ * moved to an earlier reading of their day.
+ */
+export function importHealth() {
+  if (!MOBILE || !store) return Promise.resolve(null)
+  if (reading) return reading
+  reading = (async () => {
+    const h = await loadHealth()
+    if (!h.readOn) return { health: h, added: 0, updated: 0 }
+    const p = await plugin()
+    if (!p) return { health: h, added: 0, updated: 0 }
+    const now = Date.now()
+    const since = readSince(h.readAt, now)
+    let out, added = 0, updated = 0
+    try {
+      const res = await p.HC.readWeights({ since })
+      const records = Array.isArray(res?.records) ? res.records : []
+      const opts = S => ({ unit: S?.unit, deleted: S?.deleted?.bodyweight, ownPackage: res?.own || null, since })
+      const S = store.get()
+      const first = mergeImportedWeights(S?.bodyweight, records, opts(S))
+      if (first.added || first.updated) {
+        // Merged again inside the update, on the copy the store holds then: a weigh-in typed
+        // while Health Connect was answering is not overwritten by a merge made before it.
+        store.apply(draft => {
+          const r = mergeImportedWeights(draft.bodyweight, records, opts(draft))
+          draft.bodyweight = r.bodyweight
+          added = r.added
+          updated = r.updated
+        })
+      }
+      out = { ...(await loadHealth()), readAt: now, readError: null }
+    } catch (e) {
+      out = { ...(await loadHealth()), readError: e?.code === 'permission' ? 'permission' : e?.code === 'unavailable' ? 'unavailable' : 'failed' }
+    }
+    await saveHealth(out)
+    told(out)
+    return { health: out, added, updated }
+  })().finally(() => { reading = null })
+  return reading
+}
+
+/**
+ * Turning the read side on: asks for the read permission (on its own, apart from the write
+ * ones), then reads once. Resolves with { ok, reason, health, added, updated } — reason
+ * 'denied' when it was not granted, or the status when Health Connect is not there to ask.
+ */
+export async function enableHealthRead() {
+  const p = await plugin()
+  if (!p) return { ok: false, reason: 'unsupported' }
+  const st = await p.HC.status().catch(() => ({ status: 'unsupported' }))
+  if (st.status !== 'available') return { ok: false, reason: st.status }
+  const granted = st.readGranted || (await p.HC.requestPermissions({ read: true }).catch(() => ({ granted: false }))).granted
+  if (!granted) return { ok: false, reason: 'denied' }
+  if (reading) await reading.catch(() => {})
+  const on = { ...(await loadHealth()), readOn: true, readError: null }
+  await saveHealth(on)
+  told(on)
+  const r = await importHealth()
+  const health = r?.health || on
+  return { ok: !health.readError, reason: health.readError || null, health, added: r?.added || 0, updated: r?.updated || 0 }
+}
+
+/**
+ * Turning the read side off. What was imported stays in the log: those are the user's weigh-ins
+ * now. Turned on again, it reads the last year once more; a day the user removed meanwhile
+ * stays removed (lib/health-import.js).
+ */
+export async function disableHealthRead() {
+  if (reading) await reading.catch(() => {})
+  const out = { ...(await loadHealth()), readOn: false, readAt: 0, readError: null }
+  await saveHealth(out)
+  told(out)
+  return out
+}
+
 // Back in the foreground: a change synced from another device while the phone was away, or a
-// permission the user granted again in Health Connect's own settings, is picked up then.
+// permission the user granted again in Health Connect's own settings, is picked up then; so are
+// the weigh-ins other apps saved meanwhile.
 let started = false
-export function initHealthSync(getState) {
+/**
+ * `getState` returns the store's S; `apply` is the store's update (it takes a function that
+ * changes a copy of S), the path the read side takes weigh-ins in through.
+ */
+export function initHealthSync(getState, apply) {
   if (!MOBILE || started) return
   started = true
+  store = typeof apply === 'function' ? { get: getState, apply } : null
+  const both = () => { syncHealth(getState()).catch(() => {}); importHealth().catch(() => {}) }
   import('@capacitor/app').then(({ App }) => {
-    App.addListener('appStateChange', ({ isActive }) => { if (isActive) syncHealth(getState()).catch(() => {}) })
+    App.addListener('appStateChange', ({ isActive }) => { if (isActive) both() })
   }).catch(() => {})
-  // Once at launch, for a workout finished just before the app was closed. Reading the file here
-  // also settles whether it is on, which the saves wait for (syncHealth).
-  setTimeout(() => loadHealth().then(() => syncHealth(getState())).catch(() => {}), 3000)
+  // Once at launch, for a workout finished or a weigh-in saved just before the app was closed.
+  // Reading the file here also settles whether it is on, which the saves wait for (syncHealth).
+  setTimeout(() => loadHealth().then(both).catch(() => {}), 3000)
 }

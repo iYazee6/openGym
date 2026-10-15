@@ -7,7 +7,7 @@ import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { rememberDefaultLang } from '../lib/default-lang.js'
 import { guestAllowed } from '../lib/guest.js'
 import { MOBILE, initReminderSync, nativeLoad, nativeSave, onAppActive, readJsonFile, syncReminder, writeAutoBackup, writeJsonFile } from '../lib/mobile.js'
-import { initHealthSync, syncHealth } from '../lib/health-sync.js'
+import { initHealthSync, syncHealth, importHealth } from '../lib/health-sync.js'
 import { refillIfComplete } from '../lib/rotation.js'
 import { liftLegacy } from '../lib/sync-legacy.js'
 import { mergeStates, localExtras, stampChange, highestStamp, stampRestore, stampReplace, inUnitOf, keepReset, resetIdsOf, mergeResetIds, entryKey } from '../lib/sync-merge.js'
@@ -473,7 +473,8 @@ export const useStore = create((set, get) => {
   }
 
   initReminderSync(() => get().S)
-  initHealthSync(() => get().S)
+  // The read side (#544) takes weigh-ins in through update, like any other change.
+  initHealthSync(() => get().S, mut => get().update(mut))
 
   // Mobile build: the file mirror, and beside it whose copy it is and which one (its `_ts`) —
   // restoreFromMirror takes the file back only for that account, and only while the two agree,
@@ -1654,6 +1655,9 @@ export const useStore = create((set, get) => {
     // "Sync now": what is waiting goes, the server's copy is checked, and the answer is the
     // `sync` every screen reads — status 'ok' when the two agree.
     async syncNow() {
+      // Weigh-ins other apps saved to Health Connect come in first, so this sync takes them along
+      // (a no-op unless the phone reads them, lib/health-sync.js).
+      await importHealth().catch(() => {})
       if (!get().user) { setSync({}); return get().sync }
       // Held for a sign-in's question: "Sync now" is asking it (again), and the sync follows.
       if (adoptHold) { await get().resumeAdoption(); if (adoptHold) return get().sync }

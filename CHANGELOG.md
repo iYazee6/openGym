@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Health Connect: import weigh-ins** (Android, #544). A second switch in Settings → Health Connect
+  reads the weigh-ins other apps saved there (a smart scale, Samsung Health) into the body weight
+  log: the earliest of each day, never over one you typed in openGym.
+
 ## v1.4.1 (2026-10-10)
 
 Bug fixes for v1.4.0, mostly the things you told us about on Discord and GitHub.
