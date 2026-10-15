@@ -8,6 +8,13 @@
 // A weigh-in typed in openGym always wins: an import never replaces it. An imported one carries
 // `src: 'hc'`, so a later import may move it to an earlier reading of the same day, and the write
 // side (lib/health-connect.js) does not write it back to Health Connect where it came from.
+//
+// An imported one also keeps the time of the reading itself in `ht` (ms). Its `t` is the change's
+// time, as for any weigh-in: the store stamps it when the import goes in (sync-merge.js
+// stampChange), so it cannot tell which reading of a day the entry holds. Every comparison here
+// is by `ht`, and the charts place an imported weigh-in at `ht` (lib/bodyweight.js weighInTime).
+// Days are the phone's own: a reading belongs to the date it falls on in the time zone the phone
+// is in at the read.
 import { isoOf } from './format.js'
 
 export const HC_SRC = 'hc'
@@ -47,9 +54,9 @@ function earliestByDay(records, { unit, ownPackage, since }) {
     if (since > 0 && time < since) continue
     const d = isoOf(new Date(time))
     const cur = byDay.get(d)
-    if (cur && cur.t <= time) continue
+    if (cur && cur.ht <= time) continue
     const w = Math.round((unit === 'lb' ? kg * LB_PER_KG : kg) * 10) / 10
-    byDay.set(d, { d, w, t: time, src: HC_SRC })
+    byDay.set(d, { d, w, t: time, ht: time, src: HC_SRC })
   }
   return byDay
 }
@@ -78,9 +85,10 @@ export function mergeImportedWeights(bodyweight, records, { unit = 'kg', deleted
       continue
     }
     if (!isImported(cur)) continue              // typed in openGym: it wins
-    const curT = Number(cur.t) || 0
-    const earlier = entry.t < curT
-    const corrected = entry.t === curT && entry.w !== cur.w
+    // The reading the day holds: `ht`, never `t`, which the store moves to the import's time.
+    const curHt = Number(cur.ht) || Number(cur.t) || 0
+    const earlier = entry.ht < curHt
+    const corrected = entry.ht === curHt && entry.w !== cur.w
     if (!earlier && !corrected) continue
     out[out.indexOf(cur)] = { ...cur, ...entry }
     updated++

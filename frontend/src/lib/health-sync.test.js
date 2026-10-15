@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stampChange } from './sync-merge.js'
 
 // #200: the Android app keeping Health Connect in step with the log. The native plugin
 // (HealthConnectPlugin.java) and the app's data directory are played in memory.
 const h = vi.hoisted(() => {
   vi.stubEnv('VITE_MOBILE', '1')
-  return { files: new Map(), calls: [], status: { status: 'available', granted: false }, grant: true, fail: null, records: [], readFail: null }
+  return { files: new Map(), calls: [], status: { status: 'available', granted: false }, grant: true, fail: null, records: [], readFail: null, truncated: false }
 })
 
 vi.mock('@capacitor/filesystem', () => ({
@@ -30,7 +31,7 @@ vi.mock('@capacitor/core', () => ({
     readWeights: async arg => {
       h.calls.push(['read', arg])
       if (h.readFail) throw Object.assign(new Error('refused'), { code: h.readFail })
-      return { records: h.records, own: 'ch.duartesantos.opengym' }
+      return { records: h.records, own: 'ch.duartesantos.opengym', truncated: h.truncated }
     },
     write: async arg => {
       h.calls.push(['write', arg])
@@ -53,7 +54,7 @@ let hs
 beforeEach(async () => {
   vi.resetModules()
   h.files.clear(); h.calls = []; h.status = { status: 'available', granted: false }; h.grant = true; h.fail = null
-  h.records = []; h.readFail = null
+  h.records = []; h.readFail = null; h.truncated = false
   hs = await import('./health-sync.js')
 })
 
@@ -184,7 +185,7 @@ describe('reading weigh-ins', () => {
     expect(since).toBeGreaterThan(before - 366 * 86400000)
     // The earliest reading of the 17th; the 18th was typed in openGym and stays as it is.
     expect(S.bodyweight).toEqual([
-      { d: '2026-09-17', w: 80.4, t: at(17, 7), src: 'hc' },
+      { d: '2026-09-17', w: 80.4, t: at(17, 7), ht: at(17, 7), src: 'hc' },
       { d: '2026-09-18', w: 82, t: at(18, 21) },
     ])
     expect(file()).toMatchObject({ readOn: true, readError: null, on: false })
@@ -247,6 +248,43 @@ describe('reading weigh-ins', () => {
     await hs.importHealth()
     expect(reads()).toEqual([])
     expect(S.bodyweight.map(b => b.d)).toEqual(['2026-09-17'])
+  })
+
+  it('reads the same readings again without touching the log, through the store’s own stamping', async () => {
+    // The store's update path: a copy, the change, then stampChange as useStore update runs it.
+    S = state([])
+    hs.initHealthSync(() => S, mut => { const prev = S, next = structuredClone(prev); mut(next); stampChange(prev, next, Date.now()); S = next })
+    h.records = [rec(17, 7, 80.4)]
+    expect(await hs.enableHealthRead()).toMatchObject({ added: 1, updated: 0 })
+    const stored = structuredClone(S.bodyweight)
+    expect(stored[0].ht).toBe(at(17, 7))
+    vi.setSystemTime(at(21, 9))
+    expect(await hs.importHealth()).toMatchObject({ added: 0, updated: 0 })
+    vi.setSystemTime(at(22, 9))
+    expect(await hs.importHealth()).toMatchObject({ added: 0, updated: 0 })
+    expect(S.bodyweight).toEqual(stored)
+  })
+
+  it('a read cut short keeps the last read time, so the next one starts there again', async () => {
+    startStore(state([]))
+    await hs.enableHealthRead()
+    const readAt = file().readAt
+    vi.setSystemTime(at(21, 9))
+    h.truncated = true
+    await hs.importHealth()
+    expect(file().readAt).toBe(readAt)
+    h.truncated = false
+    await hs.importHealth()
+    expect(file().readAt).toBe(at(21, 9))
+  })
+
+  it('turning the writing off keeps what the read side saved', async () => {
+    startStore(state([], [{ d: '2026-09-16', w: 81, t: at(16, 7) }]))
+    await hs.enableHealth(S)
+    await hs.enableHealthRead()
+    const readAt = file().readAt
+    await hs.disableHealth({ removeWritten: true })
+    expect(file()).toMatchObject({ on: false, written: {}, readOn: true, readAt })
   })
 
   it('a write sync running alongside does not undo the read side’s state', async () => {

@@ -15,6 +15,22 @@ const base = (over = {}) => ({
 const clone = o => JSON.parse(JSON.stringify(o))
 const ids = xs => (xs || []).map(x => x.id)
 
+describe('mergeBodyweight: typed beats imported (#544)', () => {
+  // Typed on the web (device A), imported from Health Connect on a phone that had not pulled yet
+  // (device B): the import is stamped later, and still loses, in either order.
+  const typed = { d: '2026-09-17', w: 82, t: 100 }
+  const imported = { d: '2026-09-17', w: 80.4, t: 200, ht: 50, src: 'hc' }
+  it('keeps the typed weigh-in whichever side it is on', () => {
+    expect(mergeBodyweight([typed], [imported])).toEqual([typed])
+    expect(mergeBodyweight([imported], [typed])).toEqual([typed])
+  })
+  it('still takes the newer of two imported, or of two typed, ones', () => {
+    const later = { ...imported, w: 80.1, t: 300 }
+    expect(mergeBodyweight([imported], [later])).toEqual([later])
+    expect(mergeBodyweight([{ ...typed, t: 300 }], [typed])).toEqual([{ ...typed, t: 300 }])
+  })
+})
+
 describe('newerOf / unionById / mergeBodyweight', () => {
   it('picks the later _ts, first argument on a tie or missing stamps', () => {
     const a = { _ts: 5 }, b = { _ts: 9 }

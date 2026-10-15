@@ -4,6 +4,19 @@
 import { weekKey } from './format.js'
 
 /**
+ * When a weigh-in was taken, in ms, for placing it on a chart and in a time window: the reading's
+ * own time for one imported from Health Connect (`ht`, lib/health-import.js), else when it was
+ * typed (`t`), else noon of its day. An imported weigh-in's `t` is when the import went in: a
+ * year read at once would all sit at that one moment.
+ */
+export function weighInTime(b) {
+  const ht = Number(b?.ht), t = Number(b?.t)
+  if (ht > 0) return ht
+  if (t > 0) return t
+  return b?.d ? new Date(b.d).getTime() : NaN
+}
+
+/**
  * The weigh-ins grouped into weeks, newest week first. Each week carries its mean, how many
  * weigh-ins it holds, the change of its mean from the week before it that has any (null for the
  * first), and its entries newest first. `ws` is the first day of the week (weekStartOf), so the

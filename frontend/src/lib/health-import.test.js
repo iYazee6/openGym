@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FIRST_READ_DAYS, OVERLAP_DAYS, isImported, isOwnRecord, mergeImportedWeights, readSince } from './health-import.js'
 import { healthRecords } from './health-connect.js'
+import { stampChange } from './sync-merge.js'
 
 // #544: weigh-ins other apps saved to Health Connect, taken into the body weight log.
 const DAY = 86400000
@@ -32,8 +33,8 @@ describe('mergeImportedWeights', () => {
     const r = mergeImportedWeights([], [rec(17, 19, 81.2), rec(17, 7, 80.4), rec(18, 7, 80.1)])
     expect(r.added).toBe(2)
     expect(r.bodyweight).toEqual([
-      { d: '2026-09-17', w: 80.4, t: at(17, 7), src: 'hc' },
-      { d: '2026-09-18', w: 80.1, t: at(18, 7), src: 'hc' },
+      { d: '2026-09-17', w: 80.4, t: at(17, 7), ht: at(17, 7), src: 'hc' },
+      { d: '2026-09-18', w: 80.1, t: at(18, 7), ht: at(18, 7), src: 'hc' },
     ])
     expect(r.bodyweight.every(isImported)).toBe(true)
   })
@@ -45,10 +46,10 @@ describe('mergeImportedWeights', () => {
   })
 
   it('moves an imported day to an earlier reading, or to a corrected one at the same time', () => {
-    const had = [{ d: '2026-09-17', w: 81.2, t: at(17, 19), src: 'hc' }]
+    const had = [{ d: '2026-09-17', w: 81.2, t: at(17, 19), ht: at(17, 19), src: 'hc' }]
     const earlier = mergeImportedWeights(had, [rec(17, 7, 80.4)])
     expect(earlier.updated).toBe(1)
-    expect(earlier.bodyweight).toEqual([{ d: '2026-09-17', w: 80.4, t: at(17, 7), src: 'hc' }])
+    expect(earlier.bodyweight).toEqual([{ d: '2026-09-17', w: 80.4, t: at(17, 7), ht: at(17, 7), src: 'hc' }])
     expect(had[0].w).toBe(81.2)   // pure: the input is not changed
 
     const later = mergeImportedWeights(earlier.bodyweight, [rec(17, 19, 81.2)])
@@ -57,6 +58,34 @@ describe('mergeImportedWeights', () => {
 
     const corrected = mergeImportedWeights(earlier.bodyweight, [rec(17, 7, 80.6)])
     expect(corrected.bodyweight[0].w).toBe(80.6)
+  })
+
+  // Naqid, fix round: the store stamps an imported entry's `t` with the import's time
+  // (stampChange), so every comparison has to be by the reading's own time, `ht`.
+  it('a second read of the same reading changes nothing once the store has stamped the entry', () => {
+    const recs = [rec(17, 7, 80.4)]
+    let S = { bodyweight: [] }
+    const read = wall => {
+      const prev = S, next = structuredClone(prev)
+      const r = mergeImportedWeights(next.bodyweight, recs)
+      next.bodyweight = r.bodyweight
+      stampChange(prev, next, wall)
+      S = next
+      return r
+    }
+    expect(read(at(17, 8)).added).toBe(1)
+    expect(S.bodyweight[0].t).toBe(at(17, 8))   // stamped: no longer the reading's time
+    for (const wall of [at(17, 9), at(18, 9), at(20, 9)]) {
+      const r = read(wall)
+      expect(r).toMatchObject({ added: 0, updated: 0 })
+    }
+    expect(S.bodyweight).toEqual([{ d: '2026-09-17', w: 80.4, t: at(17, 8), ht: at(17, 7), src: 'hc' }])
+  })
+
+  it('a later read that sees only the evening reading of a day keeps the morning one', () => {
+    const had = [{ d: '2026-09-17', w: 80.4, t: at(17, 21), ht: at(17, 7), src: 'hc' }]
+    const r = mergeImportedWeights(had, [rec(17, 20, 81.5)], { since: at(17, 12) })
+    expect(r).toEqual({ bodyweight: had, added: 0, updated: 0 })
   })
 
   it('does not bring back a day the user removed in openGym', () => {

@@ -163,12 +163,18 @@ export function mergeWorkoutMedia(kept, other) {
 const byDayStart = (a, b) => (a.d === b.d ? (a.start || 0) - (b.start || 0) : a.d < b.d ? -1 : 1)
 
 /** One entry per day; where both have a day, the one edited later (`t`); sorted by day. */
+// A weigh-in typed in openGym beats one imported from Health Connect (`src: 'hc'`, #544) for the
+// same day, whichever is newer: the import is stamped when it goes in, so on a phone that had
+// not pulled yet it came out newer than the weigh-in typed on the web, and replaced it everywhere.
+// The phone itself never imports over a typed one (lib/health-import.js); the merge keeps to that.
+const typedOverImported = (e, cur) => (e.src === 'hc') !== (cur.src === 'hc') ? cur.src === 'hc' : null
 export function mergeBodyweight(a = [], b = []) {
   const byDay = new Map()
   for (const e of [...list(a), ...list(b)]) {
     if (!e || e.d == null) continue
     const cur = byDay.get(e.d)
-    if (!cur || (e.t || 0) > (cur.t || 0)) byDay.set(e.d, e)
+    const typed = cur ? typedOverImported(e, cur) : null
+    if (!cur || (typed ?? (e.t || 0) > (cur.t || 0))) byDay.set(e.d, e)
   }
   return [...byDay.values()].sort((x, y) => (x.d < y.d ? -1 : 1))
 }

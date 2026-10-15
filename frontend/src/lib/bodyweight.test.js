@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { weeklyWeights } from './bodyweight.js'
+import { weighInTime, weeklyWeights } from './bodyweight.js'
 
 // Discord 'Weight': every weigh-in, week by week, with the week's mean.
 describe('weeklyWeights', () => {
@@ -37,5 +37,15 @@ describe('weeklyWeights', () => {
     expect(weeks[0]).toMatchObject({ n: 2, avg: 80 })
     expect(weeks[0].entries.map(b => b.d)).toEqual(['2026-09-09', '2026-09-07'])
     expect(weeklyWeights(undefined, 1)).toEqual([])
+  })
+})
+
+describe('weighInTime', () => {
+  // #544: an imported weigh-in's `t` is when the import went in; the chart wants the reading.
+  it('is the reading time for an imported weigh-in, else when it was typed, else its day', () => {
+    expect(weighInTime({ d: '2026-09-17', w: 80, t: 900, ht: 500, src: 'hc' })).toBe(500)
+    expect(weighInTime({ d: '2026-09-17', w: 80, t: 900 })).toBe(900)
+    expect(weighInTime({ d: '2026-09-17', w: 80 })).toBe(new Date('2026-09-17').getTime())
+    expect(Number.isNaN(weighInTime({}))).toBe(true)
   })
 })

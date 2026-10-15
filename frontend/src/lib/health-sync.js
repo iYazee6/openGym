@@ -166,7 +166,8 @@ export async function disableHealth({ removeWritten = false } = {}) {
       await p.HC.remove(ids)
     }
   }
-  const out = { ...h, on: false, error: null, written: removeWritten ? {} : h.written }
+  // Read again after the remove: a read that went through meanwhile keeps what it saved.
+  const out = { ...(await loadHealth()), on: false, error: null, written: removeWritten ? {} : h.written }
   await saveHealth(out)
   told(out)
   return out
@@ -213,7 +214,9 @@ export function importHealth() {
           updated = r.updated
         })
       }
-      out = { ...(await loadHealth()), readAt: now, readError: null }
+      // A read cut short (more pages than the plugin goes through at once) keeps its last
+      // read time, so the next read starts where this one did and nothing is skipped for good.
+      out = { ...(await loadHealth()), readAt: res?.truncated ? h.readAt : now, readError: null }
     } catch (e) {
       out = { ...(await loadHealth()), readError: e?.code === 'permission' ? 'permission' : e?.code === 'unavailable' ? 'unavailable' : 'failed' }
     }

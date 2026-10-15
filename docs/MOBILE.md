@@ -196,9 +196,12 @@ before that.
   `WRITE_WEIGHT` and `READ_WEIGHT`; the read permission is asked for on its own, when the user
   turns on "Import weigh-ins from Health Connect".
 - **How a reading becomes a weigh-in:** one per day, the earliest reading of the day, in the
-  profile's unit and marked as imported (`src: 'hc'`). A weigh-in typed in openGym is never
+  profile's unit and marked as imported (`src: 'hc'`, with the reading's own time in `ht`). The day
+  is the date the reading falls on in the phone's time zone at the time of the read, so a reading
+  near midnight read after travelling can land on the neighbouring day. A weigh-in typed in openGym is never
   replaced; one typed over an imported day makes that day the user's own. A day removed in
-  openGym is not brought back. Imported weigh-ins go into the log through the store like any
+  openGym is not brought back, and when two devices merge, a weigh-in typed on either one beats an
+  imported one for the same day. Imported weigh-ins go into the log through the store like any
   other change, so they sync to a server and to other devices. `src/lib/health-import.js` works
   this out; its tests pin it.
 - **No loop.** A record openGym wrote (its `clientRecordId` starts with `opengym-`, or its origin

@@ -65,7 +65,7 @@ import org.json.JSONObject;
  *   await HC.status();              // { status: 'available' | 'update' | 'missing' | 'unsupported', granted, readGranted }
  *   await HC.requestPermissions();  // { granted }: the write permissions
  *   await HC.requestPermissions({ read: true });  // { granted }: READ_WEIGHT alone
- *   await HC.readWeights({ since }); // { records: [{ id, time, kg, origin, clientRecordId }], own }
+ *   await HC.readWeights({ since }); // { records: [{ id, time, kg, origin, clientRecordId }], own, truncated }
  *   await HC.write({ sessions: [...], weights: [...] });
  *   await HC.remove({ sessions: [ids], weights: [ids] });
  *   await HC.openSettings();        // Health Connect's data screen, or its store page
@@ -247,6 +247,7 @@ public class HealthConnectPlugin extends Plugin {
                 TimeRangeFilter range = TimeRangeFilter.Companion.after(Instant.ofEpochMilli(since));
                 JSArray out = new JSArray();
                 String token = null;
+                boolean truncated = false;
                 for (int page = 0; page < MAX_PAGES; page++) {
                     ReadRecordsRequest<WeightRecord> request = new ReadRecordsRequest<>(
                             JvmClassMappingKt.getKotlinClass(WeightRecord.class), range,
@@ -269,10 +270,13 @@ public class HealthConnectPlugin extends Plugin {
                     }
                     token = res.getPageToken();
                     if (token == null || token.isEmpty()) break;
+                    // More pages than one read goes through: JS keeps its last read time.
+                    if (page == MAX_PAGES - 1) truncated = true;
                 }
                 JSObject r = new JSObject();
                 r.put("records", out);
                 r.put("own", own);
+                r.put("truncated", truncated);
                 call.resolve(r);
             } catch (SecurityException e) {
                 call.reject(e.getMessage(), "permission");
