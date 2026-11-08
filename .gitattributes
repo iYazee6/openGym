@@ -1,0 +1,2 @@
+# Shell scripts are copied into Linux images; keep them LF on every checkout (2026-11-08: a CRLF entrypoint script restarted opengym-web in a loop).
+*.sh text eol=lf
