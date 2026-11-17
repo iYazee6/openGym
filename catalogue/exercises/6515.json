@@ -3,10 +3,11 @@
   "name": "lever bent over single arm neutral grip row (with chest support)",
   "bodyPart": "back",
   "equipment": "leverage machine",
-  "target": "lats",
+  "machineKind": "t-bar-row",
+  "target": "upper back",
   "secondaryMuscles": [
-    "upper back",
-    "rear deltoids",
+    "lats",
+    "rear delts",
     "biceps"
   ],
   "category": "strength",

@@ -3,12 +3,15 @@
   "name": "cable supine reverse fly",
   "bodyPart": "shoulders",
   "equipment": "cable",
-  "target": "delts",
+  "target": "rear delts",
   "secondaryMuscles": [
     "trapezius",
     "rhomboids"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "Lying face down on a bench, you raise the cable handles out to the sides. It works the rear delts and upper back.",
   "instructions": [
     "Attach a D-handle to a low pulley cable machine and lie face down on a flat bench.",

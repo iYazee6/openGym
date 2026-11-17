@@ -1,13 +1,13 @@
 {
   "id": "0264",
   "name": "cross jacks",
-  "bodyPart": "cardio",
+  "bodyPart": "full body",
   "equipment": "body weight",
   "target": "cardiovascular system",
   "secondaryMuscles": [
     "calves",
     "glutes",
-    "shoulders",
+    "front delts",
     "quadriceps"
   ],
   "category": "cardio",

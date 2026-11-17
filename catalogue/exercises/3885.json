@@ -1,13 +1,13 @@
 {
   "id": "3885",
   "name": "double under jump rope",
-  "bodyPart": "cardio",
+  "bodyPart": "full body",
   "equipment": "rope",
   "target": "cardiovascular system",
   "secondaryMuscles": [
     "calves",
     "forearms",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "cardio",

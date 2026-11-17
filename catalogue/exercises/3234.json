@@ -5,9 +5,12 @@
   "equipment": "dumbbell",
   "target": "pectorals",
   "secondaryMuscles": [
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A flat-bench dumbbell fly done with a wide arc and a stretch across the chest. It isolates the pecs.",
   "instructions": [
     "Lie flat on a bench with a dumbbell in each hand, palms facing each other.",

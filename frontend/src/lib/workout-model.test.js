@@ -1,10 +1,11 @@
+import { splitClusterReps, isClusterSet, syncSideAggregate as syncSides } from './workout-model.js'
 import { describe, it, expect } from 'vitest'
 import {
   phaseForSet, isWarmupRow, modeForSet, modeForEntry,
   setType, isDropSet, isRestPauseSet, dropsOf, clustersOf, extraVolumeOf,
   addDrop, addCluster, removeDropAt, removeClusterAt, setDropAt, setClusterAt,
   nextDropWeight, nextBurstReps, splitBurstReps,
-  isSideSet, makeSideSet, syncSideAggregate, setSideField, toggleSide, WEIGHT_ORIGIN_MANUAL,
+  isSideSet, makeSideSet, syncSideAggregate, setSideField, toggleSide, WEIGHT_ORIGIN_MANUAL, markWarmupEdited,
   addSideDrop, removeSideDropAt, setSideDropAt, addSideCluster, removeSideClusterAt, setSideClusterAt,
 } from './workout-model.js'
 
@@ -367,5 +368,50 @@ describe('addSideCluster / removeSideClusterAt / setSideClusterAt', () => {
     expect(s.sides.L.clusters).toEqual([])
     expect(s.sides.L.r).toBe(8)                        // back to the base
     expect(s.type).toBeUndefined()
+  })
+})
+
+// "Your last session" carries only the warm-ups you set up (#525), so the mark must land on
+// exactly those: a typed or stepped load, reps or length on a warm-up, never effort or a work row.
+describe('markWarmupEdited', () => {
+  const warm = { w: 40, r: 8, done: false, phase: 'warmup', warmup: true }
+  it('marks a warm-up whose numbers were set', () => {
+    for (const f of ['w', 'r', 'sec']) expect(markWarmupEdited(warm, f)).toEqual({ ...warm, edited: true })
+    expect(markWarmupEdited(warm)).toEqual({ ...warm, edited: true })
+    expect(warm.edited).toBeUndefined()
+  })
+  it('leaves effort edits and work rows alone', () => {
+    expect(markWarmupEdited(warm, 'rpe')).toBe(warm)
+    const work = { w: 100, r: 5, done: false }
+    expect(markWarmupEdited(work, 'w')).toBe(work)
+  })
+  it('keeps the mark through a per-side resync', () => {
+    const side = markWarmupEdited(syncSideAggregate({ phase: 'warmup', warmup: true, sides: { L: { w: 10, r: 5 }, R: { w: 10, r: 5 } } }), 'r')
+    expect(setSideField(side, 'L', 'r', 6).edited).toBe(true)
+  })
+})
+
+describe('cluster sets (1.4.5)', () => {
+  it('cuts a set into mini-sets, a small remainder onto the last one', () => {
+    expect(splitClusterReps(9, 3)).toEqual([3, 3, 3])
+    expect(splitClusterReps(10, 3)).toEqual([3, 3, 4])
+    expect(splitClusterReps(11, 3)).toEqual([3, 3, 3, 2])
+    expect(splitClusterReps(2, 3)).toEqual([2])
+    expect(splitClusterReps(0, 3)).toEqual([])
+  })
+  it('is a rest-pause row with its own name, and goes back to straight without its mini-sets', () => {
+    const row = { w: 100, r: 6, type: 'restpause', cluster: true, clusters: [{ r: 3, restSec: 20 }, { r: 3, restSec: 20 }] }
+    expect(isClusterSet(row)).toBe(true)
+    expect(isRestPauseSet(row)).toBe(true)
+    expect(isClusterSet({ ...row, cluster: undefined })).toBe(false)
+    const plain = removeClusterAt(removeClusterAt(row, 0), 0)
+    expect(plain.type).toBe('straight')
+    expect('cluster' in plain).toBe(false)
+  })
+  it('keeps the name on a per-side row', () => {
+    const side = { w: 20, r: 6, type: 'restpause', cluster: true, clusters: [{ r: 3, restSec: 20 }, { r: 3, restSec: 20 }] }
+    const row = syncSides({ w: 20, r: 12, type: 'restpause', cluster: true, sides: { L: side, R: side } })
+    expect(row.sides.L.cluster).toBe(true)
+    expect(isClusterSet(row)).toBe(true)
   })
 })

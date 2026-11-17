@@ -3,12 +3,11 @@
   "name": "scapula elevation depression",
   "bodyPart": "back",
   "equipment": "body weight",
-  "target": "traps",
+  "target": "upper back",
   "secondaryMuscles": [
-    "upper back",
     "rhomboids",
     "trapezius",
-    "shoulders"
+    "front delts"
   ],
   "category": "mobility",
   "description": "A drill where you shrug your shoulders up and then press them down. It builds control of the shoulder blades.",

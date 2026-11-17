@@ -5,12 +5,15 @@
   "equipment": "dumbbell",
   "target": "pectorals",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "biceps",
     "upper chest",
     "core"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A dumbbell fly with your feet lifted and knees at 90 degrees. It stretches the chest and keeps your back flat.",
   "instructions": [
     "Lie on a bench holding dumbbells above your chest.",

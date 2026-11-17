@@ -3,12 +3,11 @@
   "name": "ez bar russian twist sit up",
   "bodyPart": "waist",
   "equipment": "ez barbell",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "hip flexors",
     "lower abs",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
   "description": "A sit-up that adds a twist while holding an EZ bar. Works the abs and obliques together.",

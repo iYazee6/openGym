@@ -3,9 +3,10 @@
   "name": "smith bent knee good morning",
   "bodyPart": "upper legs",
   "equipment": "smith machine",
-  "target": "glutes",
+  "machineKind": "smith",
+  "target": "hamstrings",
   "secondaryMuscles": [
-    "hamstrings",
+    "glutes",
     "lower back"
   ],
   "category": "strength",

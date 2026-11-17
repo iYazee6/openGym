@@ -6,10 +6,11 @@
   "target": "abs",
   "secondaryMuscles": [
     "core",
-    "shoulders",
+    "front delts",
     "hip flexors"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A four-point hold on hands and knees where you engage the abs. A gentle way to learn core bracing.",
   "instructions": [
     "Start on hands and knees with wrists under shoulders and knees under hips.",

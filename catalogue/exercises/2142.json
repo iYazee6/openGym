@@ -3,9 +3,10 @@
   "name": "ski ergometer",
   "bodyPart": "upper arms",
   "equipment": "skierg machine",
-  "target": "triceps",
+  "target": "cardiovascular system",
   "secondaryMuscles": [
-    "shoulders",
+    "triceps",
+    "front delts",
     "forearms"
   ],
   "category": "cardio",

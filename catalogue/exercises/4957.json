@@ -7,9 +7,12 @@
   "secondaryMuscles": [
     "biceps",
     "rhomboids",
-    "rear deltoids"
+    "rear delts"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A lat pulldown done lying down. It trains the lats with a different angle.",
   "instructions": [
     "Lie on a bench under a high pulley.",

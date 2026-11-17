@@ -3,10 +3,10 @@
   "name": "weighted overhead press step up",
   "bodyPart": "upper legs",
   "equipment": "weighted",
-  "target": "quads",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
-    "shoulders",
+    "quadriceps",
+    "front delts",
     "triceps"
   ],
   "category": "strength",

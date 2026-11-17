@@ -3,10 +3,10 @@
   "name": "medicine ball rotational throw",
   "bodyPart": "waist",
   "equipment": "medicine ball",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "abdominals",
+    "rear delts",
     "glutes",
     "hip flexors"
   ],

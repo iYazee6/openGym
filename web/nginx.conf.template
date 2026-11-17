@@ -15,6 +15,8 @@ map $request_uri $api_request_uri {
 
 server {
     listen ${NGINX_PORT};
+    # No nginx version in the Server header or on its own error pages.
+    server_tokens off;
     root /usr/share/nginx/html;
     index index.html;
     # Every redirect nginx sends (the unknown-path one below, and /api to /api/) carries a
@@ -24,13 +26,16 @@ server {
 
     # Sent on every response below. NOTE: an `add_header` inside a location replaces the whole
     # inherited set rather than adding to it, so the two locations further down that set their
-    # own Cache-Control have to repeat these three. Deliberately not a full Content-Security-
-    # Policy: only frame-ancestors, which no part of the app depends on. TLS, HSTS and any
-    # stricter policy stay the reverse proxy's job (see SECURITY.md).
+    # own Cache-Control have to repeat these. The Content-Security-Policy is CONTENT_SECURITY_POLICY
+    # (default in web/Dockerfile): scripts only from this origin plus the one inline script in
+    # index.html, by its hash, so an injected <script> or handler does not run, and frames only from
+    # youtube-nocookie.com (an exercise's video, after a tap). Referrer-Policy stays same-origin: the
+    # player asks for the origin as its referrer itself (YouTubeVideo.jsx). TLS and HSTS stay
+    # the reverse proxy's job (see SECURITY.md).
     add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "same-origin" always;
-    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "${CONTENT_SECURITY_POLICY}" always;
 
     # API → backend container.
     # `^~` so this prefix beats the regex locations below: without it a request for a path such
@@ -77,10 +82,50 @@ server {
         proxy_send_timeout 300s;
     }
 
+    # MCP over HTTPS (docs/MCP_REMOTE.md): the optional mcp container. Same per-request resolve
+    # as /api, so a stack without it starts and runs as before; then /mcp answers with a JSON
+    # 503 saying so (an MCP client shows that, where nginx's HTML 502 page would read as junk).
+    # Only POST is forwarded with a body; the endpoint is stateless and answers JSON, so nothing
+    # streams and buffering stays on. The token travels in the Authorization header, untouched.
+    location = ${BASE_PATH}/mcp {
+        client_max_body_size 1m;
+        resolver ${RESOLVER} valid=10s ipv6=off;
+        set $mcp_upstream http://${MCP_BACKEND}:${MCP_PORT};
+        proxy_pass $mcp_upstream/mcp;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        # nginx's own 502/504 (nothing listening, a name that does not resolve); answers the mcp
+        # container itself sends pass through as they are (no proxy_intercept_errors).
+        error_page 502 504 = @mcp_off;
+    }
+    # The MCP connector's OAuth discovery (api/oauth.js): Claude and ChatGPT look for these at the
+    # host's root, under BASE_PATH also with the prefix inserted after the document's name
+    # (/.well-known/oauth-authorization-server/gym) or below the prefix (/gym/.well-known/...,
+    # which the map takes the prefix off). Only these documents, proxied to the api, which answers
+    # 404 unless MCP=on.
+    location ~ ^(\Q${BASE_PATH}\E)?/\.well-known/(oauth-authorization-server|oauth-protected-resource|openid-configuration)(\Q${BASE_PATH}\E)?(/mcp)?$ {
+        resolver ${RESOLVER} valid=10s ipv6=off;
+        set $api_upstream http://${BACKEND}:${PORT};
+        proxy_pass $api_upstream$api_request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location @mcp_off {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 503 '{"jsonrpc":"2.0","error":{"code":-32000,"message":"MCP is not running on this openGym server (docs/MCP_REMOTE.md)"},"id":null}';
+    }
+
     # Photos and videos of custom exercises (PUT and GET under api/media/). Nginx picks the
     # longest matching prefix, so this block takes those requests from the one above wherever it
     # sits. Same upstream, resolver and headers; what differs is the body. A video may be tens of
-    # MB, so the cap is MEDIA_UPLOAD_MAX (48m by default; keep it above MEDIA_VIDEO_MAX_MB)
+    # MB, so the cap is MEDIA_UPLOAD_MAX (112m by default; keep it above MEDIA_VIDEO_MAX_MB)
     # instead of 5m. The upload is passed to the API as it arrives rather than spooled to a temp
     # file here first: the API checks size, hash and type while it streams and answers a refusal
     # before the rest is sent, and spooling would double the disk writes and hide the progress.
@@ -130,6 +175,19 @@ server {
         return 302 ${BASE_PATH}/$is_args$args;
     }
 
+    # The build's chunks and stylesheets carry a hash of their content in the name (Vite's
+    # assets/<name>-<hash>.js), so a new build is new names: cache them hard, no revalidation.
+    # Before the shell rule below, since the first matching regex location wins. (No {8} for the
+    # hash: a brace in an unquoted nginx regex opens a block.)
+    location ~* /assets/[^/]+-[A-Za-z0-9_-]+\.(js|css)$ {
+        rewrite ^\Q${BASE_PATH}\E/(.*)$ /$1 break;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "same-origin" always;
+        add_header Content-Security-Policy "${CONTENT_SECURITY_POLICY}" always;
+    }
+
     # App shell: always revalidate so updates show up immediately
     location ~* \.(js|css|json|html)$ {
         # A regex location wins over the prefix block above, so it never saw its rewrite and
@@ -139,7 +197,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "same-origin" always;
-        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "${CONTENT_SECURITY_POLICY}" always;
     }
 
     # The exercise stills and animations, licensed from Gym visual for openGym only (NOTICE.md).
@@ -154,7 +212,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "same-origin" always;
-        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "${CONTENT_SECURITY_POLICY}" always;
         location ~* \.(png|jpg|jpeg|gif|webp|avif|mp4)$ {
             rewrite ^\Q${BASE_PATH}\E/(.*)$ /$1 break;
             add_header Cache-Control "public, max-age=2592000, immutable";
@@ -162,7 +220,7 @@ server {
             add_header X-Frame-Options "DENY" always;
             add_header X-Content-Type-Options "nosniff" always;
             add_header Referrer-Policy "same-origin" always;
-            add_header Content-Security-Policy "frame-ancestors 'none'" always;
+            add_header Content-Security-Policy "${CONTENT_SECURITY_POLICY}" always;
         }
     }
 
@@ -177,7 +235,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "same-origin" always;
-        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "${CONTENT_SECURITY_POLICY}" always;
     }
 
     gzip on;

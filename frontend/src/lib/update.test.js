@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { checkForUpdate, sha256, resetUpdateCheck, fetchChecksum } from './update.js'
+import { checkForUpdate, sha256, resetUpdateCheck, fetchChecksum, pickApk, APK_VARIANT, apkKind } from './update.js'
 
 // __APP_VERSION__ is defined at build time by vite.config.js (reads package.json).
 // In the test environment vitest applies the same define, so it's available here.
@@ -226,5 +226,219 @@ describe('semver comparison (via checkForUpdate behavior)', () => {
     // minus one on the minor when possible.
     mockRelease('v' + [MAJ, Math.max(0, MIN - 1), 0].join('.'))
     expect((await checkForUpdate()).hasUpdate).toBe(false)
+  })
+})
+
+// v1.4.2: a release carries a Standard and an HD APK. GitHub lists assets by name, so for the
+// names we publish the HD file would come first; each build must still find its own.
+describe('pickApk: Standard and HD APKs', () => {
+  const url = n => `https://github.com/DuarteSantos8/openGym/releases/download/v1.4.2/${n}`
+  const a = n => ({ name: n, browser_download_url: url(n) })
+  const RELEASE = ['openGym-1.4.2.apk', 'openGym-1.4.2.apk.sha256', 'openGym-HD-1.4.2.apk', 'openGym-HD-1.4.2.apk.sha256'].map(a)
+
+  it('a test build without a variant is the Standard APK', () => {
+    expect(APK_VARIANT).toBe('standard')
+  })
+
+  it('the Standard APK updates to the Standard APK and its own checksum', () => {
+    const { apk, hash } = pickApk(RELEASE, 'standard')
+    expect(apk.name).toBe('openGym-1.4.2.apk')
+    expect(hash.name).toBe('openGym-1.4.2.apk.sha256')
+  })
+
+  it('the HD APK updates to the HD APK and its own checksum, whatever the order', () => {
+    for (const list of [RELEASE, [...RELEASE].reverse()]) {
+      const { apk, hash } = pickApk(list, 'hd')
+      expect(apk.name).toBe('openGym-HD-1.4.2.apk')
+      expect(hash.name).toBe('openGym-HD-1.4.2.apk.sha256')
+    }
+  })
+
+  it('the Standard APK is never offered the HD one, even when it is listed first', () => {
+    const { apk, hash } = pickApk([...RELEASE].reverse(), 'standard')
+    expect(apk.name).toBe('openGym-1.4.2.apk')
+    expect(hash.name).toBe('openGym-1.4.2.apk.sha256')
+  })
+
+  it('also knows a -hd suffix', () => {
+    expect(pickApk(['openGym-1.5.0-hd.apk', 'openGym-1.5.0.apk'].map(a), 'hd').apk.name).toBe('openGym-1.5.0-hd.apk')
+    expect(pickApk(['openGym-1.5.0-hd.apk', 'openGym-1.5.0.apk'].map(a), 'standard').apk.name).toBe('openGym-1.5.0.apk')
+  })
+
+  it('an HD build is not moved to Standard when a release has no HD APK', () => {
+    const { apk, hash } = pickApk(['openGym-1.3.10.apk', 'openGym-1.3.10.apk.sha256'].map(a), 'hd')
+    expect(apk).toBe(null)
+    expect(hash).toBe(null)
+  })
+
+  it('names that only contain the letters hd are not HD', () => {
+    expect(pickApk([a('openGym-shdw-1.4.2.apk')], 'standard').apk.name).toBe('openGym-shdw-1.4.2.apk')
+  })
+
+  it('a checksum that belongs to another APK is not used', () => {
+    const { apk, hash } = pickApk(['openGym-HD-1.4.2.apk.sha256', 'openGym-1.4.2.apk'].map(a), 'standard')
+    expect(apk.name).toBe('openGym-1.4.2.apk')
+    expect(hash).toBe(null)
+  })
+})
+
+describe('pickApk: Standard, Plus and HD', () => {
+  const a = n => ({ name: n, browser_download_url: `https://github.com/DuarteSantos8/openGym/releases/download/v1.4.2/${n}` })
+  const NAMES = ['openGym-1.4.2.apk', 'openGym-1.4.2.apk.sha256', 'openGym-HD-1.4.2.apk', 'openGym-HD-1.4.2.apk.sha256',
+    'openGym-Plus-1.4.2.apk', 'openGym-Plus-1.4.2.apk.sha256']
+  const sorted = [...NAMES].sort().map(a)  // GitHub lists assets by name
+
+  it('names the three kinds', () => {
+    expect(apkKind('openGym-1.4.2.apk')).toBe('standard')
+    expect(apkKind('openGym-Plus-1.4.2.apk')).toBe('plus')
+    expect(apkKind('openGym-HD-1.4.2.apk')).toBe('hd')
+    expect(apkKind('openGym-1.5.0-plus.apk')).toBe('plus')
+    expect(apkKind('openGym-surplus-1.4.2.apk')).toBe('standard')
+  })
+
+  it('each kind updates only to itself, with its own checksum, in any order', () => {
+    for (const list of [sorted, [...sorted].reverse()]) {
+      for (const [variant, name] of [['standard', 'openGym-1.4.2.apk'], ['plus', 'openGym-Plus-1.4.2.apk'], ['hd', 'openGym-HD-1.4.2.apk']]) {
+        const { apk, hash } = pickApk(list, variant)
+        expect(apk.name).toBe(name)
+        expect(hash.name).toBe(`${name}.sha256`)
+      }
+    }
+  })
+
+  it('a phone from before v1.4.2 (first .apk, first .sha256 in name order) lands on Standard, checksum matching', () => {
+    expect(sorted.find(x => /\.apk$/i.test(x.name)).name).toBe('openGym-1.4.2.apk')
+    expect(sorted.find(x => /\.apk\.sha256$/i.test(x.name)).name).toBe('openGym-1.4.2.apk.sha256')
+  })
+
+  it('a Plus build is not moved to another kind when a release has no Plus APK', () => {
+    expect(pickApk(['openGym-1.4.3.apk', 'openGym-HD-1.4.3.apk'].map(a), 'plus').apk).toBe(null)
+  })
+})
+
+// On 2026-11-09 github.com's download link for a release's checksum answered 504
+// every time, while the API's link to the same asset (assets[].url, asked for octet-stream) worked.
+describe('the API asset link as a fallback', () => {
+  const HEX = 'b'.repeat(64)
+  const API = 'https://api.github.com/repos/o/r/releases/assets/'
+  const ACCEPT = { Accept: 'application/octet-stream' }
+  let originalFetch
+  beforeEach(() => { originalFetch = globalThis.fetch; resetUpdateCheck() })
+  afterEach(() => { globalThis.fetch = originalFetch })
+
+  it('checkForUpdate also gives the APK\'s and the checksum\'s API links, null when missing', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ tag_name: 'v99.0.0', assets: [
+      { name: 'a.apk', browser_download_url: 'https://github.com/d/a.apk', url: API + '1' },
+      { name: 'a.apk.sha256', browser_download_url: 'https://github.com/d/a.apk.sha256', url: API + '2' },
+    ] }) }))
+    const r = await checkForUpdate()
+    expect(r).toMatchObject({ apkUrl: 'https://github.com/d/a.apk', hashUrl: 'https://github.com/d/a.apk.sha256', apkApiUrl: API + '1', hashApiUrl: API + '2' })
+    resetUpdateCheck()
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ tag_name: 'v99.0.0', assets: [] }) }))
+    expect(await checkForUpdate()).toMatchObject({ apkApiUrl: null, hashApiUrl: null })
+  })
+
+  it('a checksum from the browser link needs no API call', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => HEX + '  a.apk\n' }))
+    expect(await fetchChecksum('https://github.com/d/a.apk.sha256', API + '2')).toBe(HEX)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(globalThis.fetch.mock.calls[0][0]).toBe('https://github.com/d/a.apk.sha256')
+  })
+
+  it('a 504 from the browser link: the API link, with the octet-stream Accept header', async () => {
+    globalThis.fetch = vi.fn(async url => url.startsWith(API)
+      ? { ok: true, status: 200, text: async () => HEX + '  a.apk\n' }
+      : { ok: false, status: 504, text: async () => '<html>504</html>' })
+    expect(await fetchChecksum('https://github.com/d/a.apk.sha256', API + '2')).toBe(HEX)
+    expect(globalThis.fetch).toHaveBeenLastCalledWith(API + '2', { headers: ACCEPT })
+  })
+
+  it('both links failing gives null', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 504, text: async () => '' }))
+    expect(await fetchChecksum('https://github.com/d/a.apk.sha256', API + '2')).toBe(null)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('the API asset link as a fallback on the phone', () => {
+  const HEX = 'c'.repeat(64)
+  const API = 'https://api.github.com/repos/o/r/releases/assets/'
+  const ACCEPT = { Accept: 'application/octet-stream' }
+  const m = {}
+  let mod
+  beforeEach(async () => {
+    vi.resetModules()
+    m.files = {}; m.calls = []
+    m.downloadFile = vi.fn(async a => { m.calls.push('download ' + a.url); m.files[a.path] = 'x' })
+    m.installApk = vi.fn(async () => { m.calls.push('install'); throw new Error('APK file not found') })
+    vi.doMock('./mobile.js', () => ({ MOBILE: true }))
+    vi.doMock('@capacitor/core', () => ({ registerPlugin: () => ({ installApk: a => m.installApk(a) }) }))
+    vi.doMock('@capacitor/app', () => ({ App: { getState: async () => ({ isActive: true }), addListener: async () => ({ remove() {} }) } }))
+    vi.doMock('@capacitor/filesystem', () => ({
+      Directory: { Cache: 'CACHE' },
+      Encoding: { UTF8: 'utf8' },
+      Filesystem: {
+        addListener: async () => ({ remove: async () => {} }),
+        downloadFile: a => m.downloadFile(a),
+        readFile: async a => ({ data: m.files[a.path] }),
+      },
+    }))
+    mod = await import('./update.js')
+  })
+  afterEach(() => {
+    for (const id of ['./mobile.js', '@capacitor/core', '@capacitor/app', '@capacitor/filesystem']) vi.doUnmock(id)
+    vi.resetModules()
+  })
+
+  it('checksum: a rejected native download falls back to the API link with the Accept header', async () => {
+    m.downloadFile = vi.fn(async a => {
+      if (!a.url.startsWith(API)) throw new Error('HTTP 504')
+      m.files[a.path] = HEX + '  a.apk\n'
+    })
+    expect(await mod.fetchChecksum('https://github.com/d/a.apk.sha256', API + '2')).toBe(HEX)
+    expect(m.downloadFile).toHaveBeenLastCalledWith(expect.objectContaining({ url: API + '2', headers: ACCEPT }))
+  })
+
+  it('checksum: an error page written to the file falls back to the API link', async () => {
+    m.downloadFile = vi.fn(async a => { m.files[a.path] = a.url.startsWith(API) ? HEX : '<html>504 Gateway Time-out</html>' })
+    expect(await mod.fetchChecksum('https://github.com/d/a.apk.sha256', API + '2')).toBe(HEX)
+    expect(m.downloadFile).toHaveBeenCalledTimes(2)
+    expect(m.downloadFile.mock.calls[0][0].headers).toBeUndefined()
+  })
+
+  it('checksum: both links failing gives null', async () => {
+    m.downloadFile = vi.fn(async a => { m.files[a.path] = '<html>504</html>' })
+    expect(await mod.fetchChecksum('https://github.com/d/a.apk.sha256', API + '2')).toBe(null)
+  })
+
+  it('APK: a rejected download from github.com comes down from the API link instead', async () => {
+    m.downloadFile = vi.fn(async a => {
+      m.calls.push('download ' + a.url)
+      if (!a.url.startsWith(API)) throw new Error('HTTP 504')
+    })
+    let n = 0
+    m.installApk = vi.fn(async () => { m.calls.push('install'); if (n++ === 0) throw new Error('APK file not found') })
+    await mod.downloadAndInstall('https://github.com/d/a.apk', HEX, null, API + '1')
+    expect(m.calls).toEqual(['install', 'download https://github.com/d/a.apk', 'download ' + API + '1', 'install'])
+    expect(m.downloadFile).toHaveBeenLastCalledWith(expect.objectContaining({ url: API + '1', headers: ACCEPT, path: 'opengym-update.apk' }))
+  })
+
+  it('APK: a file the Install plugin refuses is downloaded once from the API link and installed again', async () => {
+    let n = 0
+    m.installApk = vi.fn(async () => { m.calls.push('install'); if (n++ < 2) throw new Error('SHA-256 mismatch') })
+    await mod.downloadAndInstall('https://github.com/d/a.apk', HEX, null, API + '1')
+    expect(m.calls).toEqual(['install', 'download https://github.com/d/a.apk', 'install', 'download ' + API + '1', 'install'])
+    expect(m.installApk).toHaveBeenLastCalledWith({ fileName: 'opengym-update.apk', sha256: HEX })
+  })
+
+  it('APK: the API copy refused too reaches the caller, and there is no third download', async () => {
+    m.installApk = vi.fn(async () => { m.calls.push('install'); throw new Error('SHA-256 mismatch') })
+    await expect(mod.downloadAndInstall('https://github.com/d/a.apk', HEX, null, API + '1')).rejects.toThrow('SHA-256 mismatch')
+    expect(m.downloadFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('APK: still never without a checksum', async () => {
+    await expect(mod.downloadAndInstall('https://github.com/d/a.apk', null, null, API + '1')).rejects.toThrow(/checksum/)
+    expect(m.downloadFile).not.toHaveBeenCalled()
   })
 })

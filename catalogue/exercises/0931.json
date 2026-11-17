@@ -3,10 +3,10 @@
   "name": "band twist (down up)",
   "bodyPart": "waist",
   "equipment": "band",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders"
+    "abdominals",
+    "front delts"
   ],
   "category": "strength",
   "description": "A diagonal twist with a band moving from low to high. It trains the obliques.",

@@ -3,12 +3,12 @@
   "name": "incline push press",
   "bodyPart": "chest",
   "equipment": "barbell",
-  "target": "pectorals",
+  "target": "front delts",
   "secondaryMuscles": [
     "triceps",
-    "shoulders",
     "upper chest",
-    "quadriceps"
+    "quadriceps",
+    "side delts"
   ],
   "category": "strength",
   "description": "An incline press with a small leg drive that lets you move heavier loads and trains the upper chest and shoulders.",

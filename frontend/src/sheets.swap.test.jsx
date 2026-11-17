@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { LANGS, DERIVED_LOCALES } from './lib/i18n-core.js'
 import { act } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRoot } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { swapActiveWorkoutExercise } from './sheets.jsx'
 import { EXDB } from './lib/exercises.js'
 import { DEF, useStore } from './store/useStore.js'
@@ -9,6 +10,17 @@ import { useUI } from './store/useUI.js'
 
 const clone = value => JSON.parse(JSON.stringify(value))
 const ids = EXDB.slice(0, 3).map(exercise => exercise.id)
+const mounted = []
+
+function renderTop() {
+  const sheet = useUI.getState().sheets.at(-1)
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  mounted.push(root)
+  act(() => root.render(sheet.render(() => useUI.getState().closeSheet(sheet.id))))
+  return host
+}
 
 function entry(id, done = false) {
   return {
@@ -39,12 +51,17 @@ function submitSwap(index, exercise, config) {
 }
 
 beforeEach(() => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   vi.useFakeTimers()
   localStorage.clear()
   useUI.getState().stopRest()
   useUI.getState().stopWork()
   useUI.setState({ sheets: [], timer: null, work: null })
   installActive()
+})
+
+afterEach(() => {
+  act(() => { mounted.splice(0).forEach(root => root.unmount()) })
 })
 
 describe('active exercise swap sheet flow', () => {
@@ -63,6 +80,34 @@ describe('active exercise swap sheet flow', () => {
     expect(active.entries[0].sets).toEqual([{ w: 40, r: 5, done: false }])
     expect(active.entries[2].sets).toEqual([{ w: 40, r: 5, done: false }])
     expect(active.cur).toBe(1)
+  })
+})
+
+// Discord, tharun_01: swapping an exercise while resting took the countdown and its Skip away
+// until the next set. The rest is not the swap's business: it keeps running, pointing at its set.
+describe('a rest running through a swap', () => {
+  it('keeps running when the next exercise is replaced in place', () => {
+    useUI.getState().startRest(90, 0, { forSet: 0 })
+    submitSwap(1, EXDB[2], { mode: 'reps', sets: 2, reps: 8, weight: 30 })
+    const rest = useUI.getState().timer
+    expect(rest).not.toBeNull()
+    expect(rest.ready).toBeFalsy()
+    expect(rest.forIdx).toBe(0)
+    expect(rest.forSet).toBe(0)
+  })
+
+  it('follows its set when the replacement is inserted before it', () => {
+    const S = useStore.getState().S
+    useStore.setState({ S: { ...S, active: { ...S.active, entries: [entry(ids[0], true), entry(ids[1], true), entry(ids[2])] } } })
+    useUI.getState().startRest(90, 1, { forSet: 0 })
+    submitSwap(0, EXDB[2], { mode: 'reps', sets: 1, reps: 8, weight: 30 })
+    const confirm = useUI.getState().sheets.at(-1)
+    act(() => confirm.render(confirm.close).props.onConfirm())
+    expect(useStore.getState().S.active.entries.map(e => e.id)).toEqual([ids[0], ids[2], ids[1], ids[2]])
+    const rest = useUI.getState().timer
+    expect(rest).not.toBeNull()
+    expect(rest.forIdx).toBe(2)
+    expect(rest.forSet).toBe(0)
   })
 })
 
@@ -133,5 +178,13 @@ describe('swap wording', () => {
     const configSheet = useUI.getState().sheets.at(-1)
     const configView = configSheet.render(configSheet.close)
     expect(configView.props.saveLabel).toBe('Use in this workout')
+  })
+
+  it('renders the swap icon on exercise card action buttons (#561)', () => {
+    swapActiveWorkoutExercise(1)
+    const host = renderTop()
+    const icon = host.querySelector('.list .item .iconbtn.chev svg')
+    expect(icon).not.toBeNull()
+    expect(icon?.getAttribute('data-icon')).toBe('swap')
   })
 })

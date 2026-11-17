@@ -3,11 +3,10 @@
   "name": "russian twist (on stability ball arms straight)",
   "bodyPart": "waist",
   "equipment": "stability ball",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "core",
-    "shoulders",
+    "front delts",
     "glutes"
   ],
   "category": "strength",

@@ -3,9 +3,10 @@
   "name": "assisted side bent",
   "bodyPart": "waist",
   "equipment": "assisted",
-  "target": "abs",
+  "machineKind": "none",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "lats"
   ],
   "category": "stretching",

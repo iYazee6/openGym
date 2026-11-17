@@ -3,9 +3,10 @@
   "name": "assisted obliques stretch",
   "bodyPart": "waist",
   "equipment": "assisted",
-  "target": "abs",
+  "machineKind": "none",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "lats",
     "lower back"
   ],

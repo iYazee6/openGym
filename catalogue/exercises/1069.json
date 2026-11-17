@@ -3,11 +3,10 @@
   "name": "cable twist v. 3",
   "bodyPart": "waist",
   "equipment": "cable",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "core",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
   "description": "Rotate your torso against a cable. It works the obliques.",

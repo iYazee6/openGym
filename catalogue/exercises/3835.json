@@ -8,9 +8,10 @@
     "grip muscles",
     "biceps",
     "lats",
-    "shoulders"
+    "front delts"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A hangboard hold with your elbows bent to 90 degrees. It builds pulling strength and grip.",
   "instructions": [
     "Grip the hold and pull yourself up until your elbows are at 90 degrees.",

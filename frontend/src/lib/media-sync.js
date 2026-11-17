@@ -18,7 +18,7 @@
  * It also keeps the local store tidy (localMediaGc) and makes the plan's custom media local ahead
  * of time (startCustomMediaPrefetch), so a workout opened without a network still shows them.
  */
-import { referencedHashes, referencedFiles, MEDIA_MIMES } from './media-refs.js'
+import { keptHashes, referencedFiles, uploadableFiles, MEDIA_MIMES } from './media-refs.js'
 import { sniffKind } from './media-sniff.js'
 import { sha256Hex } from './sha256.js'
 import { mediaStore as sharedStore } from './media-store.js'
@@ -43,6 +43,7 @@ const RECENT_WORKOUT_POSTERS = 20
 const REJECTED = new Set(['media-too-large', 'media-type', 'media-invalid', 'media-too-long', 'proxy-too-large', 'hash-mismatch'])
 const PERSISTED_KEY = 'gym_state_v1'
 
+const hasSetMedia = w => Array.isArray(w?.entries) && w.entries.some(e => Array.isArray(e?.sets) && e.sets.some(s => Array.isArray(s?.media) && s.media.length))
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const isNetwork = e => !e || e.status == null || e.code === 'timeout' || e.code === 'network'
 
@@ -81,6 +82,22 @@ export function createMediaSync(deps = {}) {
   const upBackoff = new Map()     // hash → { step, until }
   const missBackoff = new Map()   // hash → { step, until }
   const fetching = new Map()      // hash → the download in flight
+  const writing = new Set()       // local store writes in flight (a download being kept)
+
+  /* GHSA-699c-6p5r-q574. Every run, download and clean-up belongs to the account it started under
+     (`ticket`). Another tab of this browser can sign out and in as someone else while one is still
+     going: the session cookie is then the new account's, and an upload sent in the old one's name
+     landed in the new one's folder. So each step after an await checks the ticket is still current
+     before it touches the server or the local store, every request names the account it is meant
+     for (the server refuses another with 409), and a sign-out's settle() ends the epoch, which
+     calls off whatever it did not wait for. */
+  let epoch = 0
+  const accountOf = () => store?.getState().user?.id ?? null
+  const ticketFor = () => ({ uid: accountOf(), epoch })
+  const current = tk => tk.epoch === epoch && tk.uid != null && accountOf() === tk.uid
+  const forAccount = uid => ({ 'X-OpenGym-Account': String(uid) })
+  const Gone = () => Object.assign(new Error('account changed'), { code: 'account-changed' })
+  const mismatch = e => e?.code === 'account-mismatch' || e?.data?.code === 'account-mismatch'
 
   const bump = (map, hash, steps) => {
     const cur = map.get(hash)
@@ -95,15 +112,30 @@ export function createMediaSync(deps = {}) {
     publishMediaStatus({ pending: S ? pendingRefCount(S) : 0, ...extra })
   }
 
-  async function run({ force = false, retryRejected = false } = {}) {
+  async function run(opts = {}) {
+    const tk = ticketFor()
+    try { await runFor(tk, opts) }
+    catch (e) {
+      if (e?.code !== 'account-changed') throw e
+      // Called off for another account: none of what it learnt is the next account's.
+      lastRun = { refs: '', at: 0, complete: false }
+    }
+  }
+
+  async function runFor(tk, { force = false, retryRejected = false } = {}) {
     if (!store) return
     const st = store.getState()
     if (!st.user) { await publishPending({ usage: null }); return }
+    const still = () => { if (!current(tk)) throw Gone() }
+    const headers = forAccount(tk.uid)
     // A boot without a network leaves the config unknown; ask again rather than decide on nothing.
     let cfg = st.config
     if (!cfg && typeof st.loadConfig === 'function') cfg = await st.loadConfig()
+    still()
     if (!cfg?.media) { await publishPending({ usage: null }); return }
-    const files = referencedFiles(st.S)
+    // A set's form video kept on its phone, or any set video on a server that does not keep
+    // them (media.sets), is neither asked about nor sent (media-refs.js uploadableFiles).
+    const files = uploadableFiles(st.S, { sets: !!cfg.media.sets, sounds: !!cfg.media.sounds, avatar: !!cfg.media.avatar })
     const refs = files.map(f => f.hash)
     // Nothing referenced (a reset, everything deleted) forgets the last run: the same files coming
     // back from a backup within ten minutes are new to the server again, not a repeat of that run.
@@ -117,11 +149,14 @@ export function createMediaSync(deps = {}) {
     let usage = null
     try {
       for (let i = 0; i < refs.length; i += MISSING_CHUNK) {
-        const r = await d.api('/api/media/missing', { method: 'POST', body: JSON.stringify({ hashes: refs.slice(i, i + MISSING_CHUNK) }) })
+        still()
+        const r = await d.api('/api/media/missing', { method: 'POST', headers, body: JSON.stringify({ hashes: refs.slice(i, i + MISSING_CHUNK) }) })
+        still()
         if (Array.isArray(r?.missing)) missing.push(...r.missing)
         if (r?.usage) usage = r.usage
       }
     } catch (e) {
+      if (e?.code === 'account-changed' || mismatch(e) || !current(tk)) throw Gone()
       lastRun = { refs: key, at: d.now(), complete: false }
       if (e?.status === 429) retryNotBefore = d.now() + (Number(e.data?.retryAfter) || 60) * 1000
       return
@@ -131,6 +166,7 @@ export function createMediaSync(deps = {}) {
       if (missingSet.has(h)) continue
       missBackoff.delete(h)   // the server has it: a device showing it as missing may ask again
       upBackoff.delete(h)
+      still()
       await d.media.markSynced(h)
     }
     let deferred = 0, unavailable = 0, rejected = 0, skipped = 0, stopped = false
@@ -146,7 +182,9 @@ export function createMediaSync(deps = {}) {
       if (!rejectTold.has(h)) { rejectTold.add(h); d.toast(t('The server refused the file as too large.')) }
     }
     for (const h of missing) {
+      still()
       const rec = await d.media.get(h)
+      still()
       if (!rec) { unavailable++; continue }   // nobody here has it: shown as missing until someone sends it
       if (rec.rejected && !retryRejected) { rejected++; continue }
       // Over this server's cap for its kind (a phone picked it under the defaults, or the caps
@@ -157,13 +195,17 @@ export function createMediaSync(deps = {}) {
       if (!force && rec.size > BG_UPLOAD_METERED_MAX_MB * MB && !d.allowed()) { deferred++; continue }   // big files wait for Wi-Fi
       if (!force && active(upBackoff, h)) { skipped++; continue }
       try {
-        const res = await d.apiUpload('/api/media/' + h, rec.blob, rec.mime)
+        still()
+        const res = await d.apiUpload('/api/media/' + h, rec.blob, rec.mime, { headers })
+        still()
         await d.media.markSynced(h)
         upBackoff.delete(h)
         quotaTold = false
         if (res && res.existed === false) added += rec.size
       } catch (e) {
         const code = e?.code
+        // The server says the session is someone else's now, or this device moved on: stop.
+        if (code === 'account-changed' || mismatch(e) || !current(tk)) throw Gone()
         if (code === 'media-quota') {
           if (!quotaTold) {
             quotaTold = true
@@ -221,10 +263,14 @@ export function createMediaSync(deps = {}) {
     return running
   }
 
-  /** Before a sign-out decides: the run in flight, then one forced run, at most 60 s. */
+  /** Before a sign-out decides: the run in flight, then one forced run, at most 60 s. Whatever is
+   *  still going after that is called off (a new epoch), and a download being written to the
+   *  local store is waited for, so nothing of this account lands after the sign-out cleared it. */
   async function settle() {
     if (running) await running.catch(() => {})
     await Promise.race([syncMedia({ force: true }), sleep(SETTLE_BUDGET_MS)])
+    epoch++
+    await Promise.allSettled([...writing])
   }
 
   /**
@@ -237,8 +283,11 @@ export function createMediaSync(deps = {}) {
    */
   function fetchToStore(hash, expect = {}, { force = false } = {}) {
     if (fetching.has(hash)) return fetching.get(hash)
+    const tk = ticketFor()
     const job = (async () => {
       if (!force && active(missBackoff, hash)) throw Object.assign(new Error('missing'), { code: 'missing' })
+      const gone = () => Object.assign(new Error('unavailable'), { code: 'unavailable' })
+      if (!current(tk)) throw gone()
       let blob
       try { blob = await d.apiBlob('/api/media/' + hash, { expectSize: typeof expect.size === 'number' ? expect.size : undefined }) }
       catch (e) {
@@ -247,13 +296,18 @@ export function createMediaSync(deps = {}) {
         if (isNetwork(e)) throw Object.assign(new Error('offline'), { code: 'offline' })
         throw Object.assign(new Error('integrity'), { code: 'integrity' })
       }
+      if (!current(tk)) throw gone()
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const sniffed = sniffKind(bytes.subarray(0, 64))
       const mime = sniffed?.mime
       if (!mime || !MEDIA_MIMES[mime] || (expect.mime && mime !== expect.mime) || (await d.sha256(bytes)) !== hash) {
         throw Object.assign(new Error('integrity'), { code: 'integrity' })
       }
-      await d.media.put(hash, new Blob([bytes], { type: mime }), { mime, pending: false })
+      // Signed out or in as someone else meanwhile: the file is not kept for them.
+      if (!current(tk)) throw gone()
+      const w = Promise.resolve(d.media.put(hash, new Blob([bytes], { type: mime }), { mime, pending: false }))
+      writing.add(w)
+      try { await w } finally { writing.delete(w) }
       missBackoff.delete(hash)
       return true
     })()
@@ -283,12 +337,17 @@ export function createMediaSync(deps = {}) {
     if (!store) return false
     if (!store.getState().ready) { gcWaiting = true; return false }
     gcWaiting = false
+    const tk = ticketFor()
     await withLock('opengym-media', async () => {
+      // Started under another account than the one signed in now: its idea of what is live is
+      // not this one's, so nothing is deleted on it.
+      const mine = () => tk.epoch === epoch && accountOf() === tk.uid
+      if (!mine()) return
       const st = store.getState()
-      const live = referencedHashes(st.S)
+      const live = keptHashes(st.S)
       try {
         const raw = d.storage?.getItem(PERSISTED_KEY)
-        if (raw) for (const h of referencedHashes(JSON.parse(raw))) live.add(h)
+        if (raw) for (const h of keptHashes(JSON.parse(raw))) live.add(h)
       } catch { /* an unreadable copy keeps nothing extra */ }
       try {
         if (typeof st.stashedMediaHashes === 'function') for (const h of await st.stashedMediaHashes()) live.add(h)
@@ -296,14 +355,17 @@ export function createMediaSync(deps = {}) {
       // A second guard on a phone: the mirror is read even after boot, since a copy that failed
       // to reach localStorage lives only there and in memory, and memory may already have moved on.
       try {
-        if (d.nativeLoad) { const saved = await d.nativeLoad(); if (saved) for (const h of referencedHashes(saved)) live.add(h) }
+        if (d.nativeLoad) { const saved = await d.nativeLoad(); if (saved) for (const h of keptHashes(saved)) live.add(h) }
       } catch { return }   // the mirror could not be read: delete nothing rather than guess
       // A file an open editor holds as its draft is live too, however long the editor has been open.
       const held = r => typeof d.media.isHeld === 'function' && d.media.isHeld(r.hash)
       const cutoff = d.now() - LOCAL_GC_GRACE_MS
       const all = await d.media.list()
-      for (const r of all) if (!live.has(r.hash) && !held(r) && (r.putAt || 0) < cutoff) await d.media.remove(r.hash)
-      if (!st.user) return
+      for (const r of all) {
+        if (!mine()) return
+        if (!live.has(r.hash) && !held(r) && (r.putAt || 0) < cutoff) await d.media.remove(r.hash)
+      }
+      if (!st.user || !mine()) return
       const left = (await d.media.list()).filter(r => live.has(r.hash) || held(r) || (r.putAt || 0) >= cutoff)
       let bytes = left.reduce((n, r) => n + (r.size || 0), 0)
       if (bytes <= LOCAL_CACHE_MAX_MB * MB) return
@@ -314,7 +376,7 @@ export function createMediaSync(deps = {}) {
         .filter(r => !r.pending && !posters.has(r.hash) && !held(r) && (r.putAt || 0) < cutoff)
         .sort((a, b) => (inState.has(a.hash) - inState.has(b.hash)) || ((a.shownAt || 0) - (b.shownAt || 0)))
       for (const r of candidates) {
-        if (bytes <= LOCAL_CACHE_MAX_MB * MB) break
+        if (bytes <= LOCAL_CACHE_MAX_MB * MB || !mine()) break
         await d.media.remove(r.hash)
         bytes -= r.size || 0
       }
@@ -338,9 +400,15 @@ export function createMediaSync(deps = {}) {
       const ids = new Set()
       ;(S?.routines || []).forEach(r => (r?.ex || []).forEach(e => { if (e?.id) ids.add(e.id) }))
       ;(S?.active?.entries || []).forEach(en => { if (en?.id) ids.add(en.id) })
-      const used = { customEx: (S?.customEx || []).filter(c => c && ids.has(c.id)) }
-      const withMedia = (Array.isArray(S?.workouts) ? S.workouts : []).filter(w => Array.isArray(w?.media) && w.media.length)
-      const posters = referencedFiles({ workouts: withMedia.slice(-RECENT_WORKOUT_POSTERS) }).filter(f => f.poster)
+      const used = {
+        customEx: (S?.customEx || []).filter(c => c && ids.has(c.id)),
+        // Your own picture on a planned built-in exercise is what its card shows: fetched early too.
+        exMedia: Object.fromEntries(Object.entries(S?.exMedia && typeof S.exMedia === 'object' ? S.exMedia : {}).filter(([id]) => ids.has(id))),
+      }
+      const withMedia = (Array.isArray(S?.workouts) ? S.workouts : []).filter(w => (Array.isArray(w?.media) && w.media.length) || hasSetMedia(w))
+      // Set videos count as workouts with media too; one kept on the phone that filmed it is never
+      // asked for (uploadableFiles).
+      const posters = uploadableFiles({ workouts: withMedia.slice(-RECENT_WORKOUT_POSTERS) }, { sets: !!store.getState().config?.media?.sets }).filter(f => f.poster)
       return [...referencedFiles(used), ...posters]
     }
     const runPrefetch = async () => {
@@ -359,7 +427,7 @@ export function createMediaSync(deps = {}) {
     const schedule = () => { clearTimeout(timer); timer = setTimeout(runPrefetch, delay) }
     let seen = store.getState().S
     const unsub = store.subscribe(s => {
-      if (s.S?.routines === seen?.routines && s.S?.active === seen?.active && s.S?.customEx === seen?.customEx && s.S?.workouts === seen?.workouts) return
+      if (s.S?.routines === seen?.routines && s.S?.active === seen?.active && s.S?.customEx === seen?.customEx && s.S?.exMedia === seen?.exMedia && s.S?.workouts === seen?.workouts) return
       seen = s.S
       schedule()
     })
@@ -389,7 +457,7 @@ export function createMediaSync(deps = {}) {
     }
     let gcTimer = null
     const scheduleGc = ms => { clearTimeout(gcTimer); gcTimer = setTimeout(() => { gcTimer = null; localMediaGc().catch(() => {}) }, ms) }
-    const refsKey = S => [...referencedHashes(S)].sort().join(',')
+    const refsKey = S => [...keptHashes(S)].sort().join(',')
     let prev = store.getState()
     let prevRefs = refsKey(prev.S)
     const unsub = store.subscribe(s => {
@@ -422,6 +490,3 @@ export const syncMedia = opts => inst().syncMedia(opts)
 export const fetchToStore = (hash, expect, opts) => inst().fetchToStore(hash, expect, opts)
 export const mayFetch = hash => inst().mayFetch(hash)
 export const localMediaGc = () => inst().localMediaGc()
-export const settleMediaSync = () => inst().settle()
-/** Tests only. */
-export const _setSharedMediaSync = s => { shared = s }

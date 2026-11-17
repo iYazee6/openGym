@@ -15,12 +15,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
+import { applyRef } from './site/ref-template.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const specPath = path.join(root, 'api', 'openapi.yaml')
 const outPath = path.join(root, 'website', 'api.html')
 const check = process.argv.includes('--check')
 const spec = yaml.load(fs.readFileSync(specPath, 'utf8'))
+
+// The cache-busting ?v= the website's pages share. index.html is the one place it is bumped;
+// a copy here drifted to an older number and turned --check red on every branch (#795).
+const indexHtml = fs.readFileSync(path.join(root, 'website', 'index.html'), 'utf8')
+const assetVersion = /styles\.css\?v=(\d+)/.exec(indexHtml)?.[1]
+if (!assetVersion) throw new Error('website/index.html has no styles.css?v=N to take the version from')
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -125,6 +132,8 @@ const TAGS = {
   meta: { title: 'Meta', side: 'Health &amp; public config' },
   auth: { title: 'Auth', side: 'Passkeys &amp; sessions' },
   pairing: { title: 'Pairing', side: 'Connect the mobile app' },
+  oidc: { title: 'OIDC', side: 'Sign in with your identity provider' },
+  watch: { title: 'Watch relay', side: 'Zepp OS watches' },
   password: { title: 'Password', side: 'Optional name &amp; password (PASSWORD_LOGIN)' },
   passkeys: { title: 'Passkeys', side: 'More passkeys &amp; device links' },
   data: { title: 'Data', side: 'State sync' },
@@ -134,6 +143,11 @@ const TAGS = {
   // A tag missing from this map renders nowhere at all, silently, so every tag in the
   // spec needs a line here.
   coach: { title: 'AI Coach', side: 'Plans, reviews, debriefs' },
+  integrations: { title: 'Integrations', side: 'Webhooks (INTEGRATIONS)' },
+  tokens: { title: 'Scoped tokens', side: 'API tokens and MCP' },
+  mcp: { title: 'MCP connector', side: 'OAuth sign-in for Claude &amp; ChatGPT (MCP)' },
+  trainers: { title: 'Trainers', side: 'Studios, sharing &amp; consent (TRAINERS)' },
+  shared: { title: 'Community', side: 'The shared library (LIBRARY)' },
   admin: { title: 'Admin', side: 'Users, invites, audit log, Coach' }
 }
 
@@ -464,7 +478,7 @@ document.querySelectorAll('[data-xall]').forEach(b => b.addEventListener('click'
 }))
 `
 
-const html = `<!DOCTYPE html>
+const page = `<!DOCTYPE html>
 <!-- GENERATED FILE - do not edit by hand.
      Built by scripts/build-api-docs.mjs from api/openapi.yaml (openGym API v${spec.info.version}).
      Regenerate with: node scripts/build-api-docs.mjs -->
@@ -495,7 +509,7 @@ const html = `<!DOCTYPE html>
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
 <link rel="apple-touch-icon" href="icon-180.png">
-<link rel="stylesheet" href="styles.css?v=26">
+<link rel="stylesheet" href="styles.css?v=${assetVersion}">
 <script>document.documentElement.className += ' js'</script>
 <!-- Umami web analytics for opengym.ch (self-hosted, cookieless). -->
 <script defer src="https://stats.duarte-santos.ch/script.js" data-website-id="db36019e-50f4-453c-9c56-d0588aefe233"></script>
@@ -505,14 +519,14 @@ const html = `<!DOCTYPE html>
 <a class="skip" href="#main">Skip to content</a>
 
 <nav><div class="wrap nav-in">
-  <a class="brand" href="/">
-    <img src="icon-180.png" alt="" width="24" height="24">
-    openGym
+  <a class="brand" href="/" aria-label="openGym">
+    <svg class="brand-mark" viewBox="80 169 352 174" aria-hidden="true"><path d="M80 242h352v28H80zM80 199h36v114H80zM131 169h47v174h-47zM334 169h47v174h-47zM396 199h36v114h-36z"/></svg><span class="brand-word">open<span>Gym</span></span>
   </a>
   <div class="nav-quick">
     <a class="ql site" href="/#features">Features</a>
     <a class="ql site" href="/#screens">Screenshots</a>
     <a class="ql site" href="/#demo">Demo</a>
+    <a class="ql site" href="/routines/">Routines</a>
     <a class="ql site" href="/docs.html">Docs</a>
     <a class="ql site" href="/api.html">API</a>
     <a class="ql site" href="/about.html">About</a>
@@ -534,6 +548,7 @@ const html = `<!DOCTYPE html>
     <a class="nl" href="/#features">Features</a>
     <a class="nl" href="/#screens">Screenshots</a>
     <a class="nl" href="/#demo">Demo</a>
+    <a class="nl" href="/routines/">Routines</a>
     <a class="nl" href="/docs.html">Docs</a>
     <a class="nl" href="/api.html">API</a>
     <a class="nl" href="/about.html">About</a>
@@ -618,6 +633,7 @@ ${schemaCards}
   <div class="links">
     <a href="docs.html">Docs</a>
     <a href="about.html">About</a>
+    <a href="privacy.html">Privacy</a>
     <a href="https://github.com/DuarteSantos8/openGym" rel="noopener">GitHub</a>
     <a href="https://gitlab.com/DuarteSantos8/opengym" rel="noopener">GitLab mirror</a>
     <a href="https://discord.gg/e62jY6fwVb" rel="noopener">Discord</a>
@@ -625,11 +641,15 @@ ${schemaCards}
   </div>
 </div></footer>
 
-<script src="site.js?v=26" defer></script>
+<script src="site.js?v=${assetVersion}" defer></script>
 <script>${js}</script>
 </body>
 </html>
 `
+
+// The reference-page template every page but home shares (scripts/site/ref-template.mjs): the
+// contents column from the tag headings, the phone drawer, the shared footer.
+const html = applyRef(page, { extraClass: 'api-main' })
 
 const rel = path.relative(root, outPath)
 const summary = `${ops.length} endpoints, ${Object.keys(spec.components.schemas).length} schemas, ${(html.length / 1024).toFixed(1)} KB`

@@ -3,11 +3,11 @@
   "name": "dumbbell straight arm twisting sit up",
   "bodyPart": "waist",
   "equipment": "dumbbell",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "hip flexors",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
   "description": "A sit-up with a rotation while holding a dumbbell on straight arms. It works the abs and obliques.",

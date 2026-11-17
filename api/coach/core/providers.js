@@ -15,21 +15,55 @@ export const HTTP_PROVIDERS = Object.freeze({
     apiKeyEnv: 'ANTHROPIC_API_KEY', oauthEnv: null,
     defaultBase: 'https://api.anthropic.com',
     defaultModel: 'claude-opus-5',
-    keyPlaceholder: 'sk-ant-…'
+    keyPlaceholder: 'sk-ant-…',
+    keyUrl: 'https://platform.claude.com/settings/keys',
+    keyPattern: /^sk-ant-[A-Za-z0-9_-]{20,}$/,
+    web: true
   }),
   openai: Object.freeze({
     label: 'OpenAI API', runtime: 'HTTPS', http: true,
     apiKeyEnv: 'OPENAI_API_KEY', oauthEnv: null,
     defaultBase: 'https://api.openai.com',
     defaultModel: 'gpt-5.6',
-    keyPlaceholder: 'sk-…'
+    keyPlaceholder: 'sk-…',
+    keyUrl: 'https://platform.openai.com/api-keys',
+    keyPattern: /^sk-(?!ant-|or-)[A-Za-z0-9_-]{20,}$/,
+    web: true
   }),
   gemini: Object.freeze({
     label: 'Google Gemini', runtime: 'HTTPS', http: true,
     apiKeyEnv: 'GEMINI_API_KEY', oauthEnv: null,
     defaultBase: 'https://generativelanguage.googleapis.com',
-    defaultModel: 'gemini-2.5-pro',
-    keyPlaceholder: 'AIza… or AQ.…'
+    // Stable and on the free tier, which is where the Discord setup guide sends people. The
+    // 2.5 names are refused for keys made after Google retired them (#758).
+    defaultModel: 'gemini-3.8-flash',
+    keyPlaceholder: 'AIza… or AQ.…',
+    keyUrl: 'https://aistudio.google.com/apikey',
+    keyPattern: /^(?:AIza[0-9A-Za-z_-]{30,}|AQ\.[0-9A-Za-z_.-]{20,})$/,
+    web: true
+  }),
+  minimax: Object.freeze({
+    label: 'MiniMax API', runtime: 'HTTPS', http: true,
+    apiKeyEnv: 'MINIMAX_API_KEY', oauthEnv: null,
+    defaultBase: 'https://api.minimax.io/v1',
+    defaultModel: 'MiniMax-M3.1-Flash',
+    keyPlaceholder: 'sk-…',
+    keyUrl: 'https://platform.minimax.io/user-center/basic-information/interface-key'
+  }),
+  // One sign-in for Claude, GPT, Gemini and the rest, through OpenRouter's own OAuth PKCE flow:
+  // the person approves openGym on openrouter.ai and gets back an API key of their own, billed to
+  // their OpenRouter credits (core/openrouter-oauth.js). A pasted key works the same.
+  openrouter: Object.freeze({
+    label: 'OpenRouter', runtime: 'HTTPS', http: true,
+    apiKeyEnv: 'OPENROUTER_API_KEY', oauthEnv: null,
+    defaultBase: 'https://openrouter.ai/api/v1',
+    // OpenRouter's own router: picks a capable model per request, so a fresh sign-in just works.
+    defaultModel: 'openrouter/auto',
+    keyPlaceholder: 'sk-or-…',
+    keyUrl: 'https://openrouter.ai/settings/keys',
+    keyPattern: /^sk-or-(?:v\d+-)?[A-Za-z0-9]{20,}$/,
+    signIn: 'pkce',
+    web: true
   }),
   // Ollama, LM Studio, vLLM, OpenRouter, a corporate gateway: anything that serves the
   // Chat Completions shape. The base URL is the whole configuration; a key is optional
@@ -44,6 +78,33 @@ export const HTTP_PROVIDERS = Object.freeze({
 });
 
 export const HTTP_PROVIDER_IDS = Object.freeze(Object.keys(HTTP_PROVIDERS));
+
+/** The provider a pasted key belongs to, by its shape, or null. Only a hint for the setup screen:
+ *  the Test button is what proves a key. */
+export function providerOfKey(raw) {
+  const key = String(raw || '').trim();
+  if (!key) return null;
+  for (const id of HTTP_PROVIDER_IDS) if (HTTP_PROVIDERS[id].keyPattern && HTTP_PROVIDERS[id].keyPattern.test(key)) return id;
+  return null;
+}
+
+/* What a model roughly costs, as a hint next to its name in the picker: 'low', 'mid' or 'high'.
+ * An exact price where the listing carries one (OpenRouter: USD per token), else read off the
+ * name, since the other providers' model lists carry no prices. Null when there is no telling. */
+export function priceTier(model, price) {
+  if (price && Number.isFinite(price.prompt) && Number.isFinite(price.completion)) {
+    const perM = (price.prompt * 3 + price.completion) / 4 * 1e6;
+    if (perM === 0) return 'free';
+    return perM < 1 ? 'low' : perM < 6 ? 'mid' : 'high';
+  }
+  const m = String(model || '').toLowerCase();
+  if (!m) return null;
+  if (/:free\b/.test(m)) return 'free';
+  if (/haiku|mini|nano|flash|lite|small|8b|7b|3b|\bm\d.*flash/.test(m)) return 'low';
+  if (/opus|fable|mythos|-pro\b|ultra|\bo\d-pro|gpt-\d+(?:\.\d+)?-pro/.test(m)) return 'high';
+  if (/sonnet|gpt-|gemini|claude|deepseek|qwen|llama|mistral|minimax/.test(m)) return 'mid';
+  return null;
+}
 
 /** The base URL a provider will actually be called at: the configured override, else the default. */
 export function baseUrlFor(id, cfg) {
@@ -111,6 +172,70 @@ export function validateBaseUrl(raw) {
   try { u = new URL(s); } catch { return { ok: false, error: 'not a valid URL' }; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'only http:// and https:// endpoints are supported' };
   if (u.username || u.password) return { ok: false, error: 'put the key in the credential field, not in the URL' };
+  // Azure OpenAI's portal hands out a full Responses or deployment URL with ?api-version=…;
+  // the Coach speaks Chat Completions under Azure's versionless v1 path instead (#869).
+  const azure = /(^|\.)(openai\.azure\.com|cognitiveservices\.azure\.com|services\.ai\.azure\.com)$/i.test(u.hostname);
+  const fullPath = /\/(chat\/completions|responses|completions)\/?$/i.test(u.pathname);
+  if (azure && (u.search || fullPath || !/\/openai\/v1\/?$/i.test(u.pathname))) return { ok: false, error: `for Azure OpenAI use https://${u.hostname}/openai/v1 as the base URL and the deployment name as the model` };
   if (u.search || u.hash) return { ok: false, error: 'a base URL has no query string' };
+  if (fullPath) return { ok: false, error: 'enter the base URL only, without /chat/completions or /responses at the end' };
   return { ok: true, value: u.toString().replace(/\/+$/, '') };
+}
+
+/*
+ * Plain http:// from the phone (#913). The phone calls the Coach's endpoint itself, and a model on
+ * the home network (llama.cpp, Ollama, LM Studio on 192.168.x.x) usually has no certificate a
+ * phone would trust: Let's Encrypt cannot issue one for a bare IP. So http:// is allowed there,
+ * and only there; anything on the internet stays https://, since the key and the training data
+ * ride in the request.
+ *
+ * Private means what both phone platforms let through in clear: the IPv4 private ranges
+ * (10/8, 172.16/12, 192.168/16), loopback, link-local 169.254/16, the 100.64/10 shared range
+ * Tailscale hands its devices, IPv6 loopback, unique-local fc00::/7 (the fd… addresses) and
+ * link-local fe80::/10, `localhost`, mDNS names under .local and single-label names (a host on
+ * the LAN's own DNS). iOS: NSAllowsLocalNetworking in Info.plist, and App Transport Security
+ * never applies to IP literals. Android: cleartext is allowed app wide
+ * (network_security_config.xml, #428), because Android cannot scope it to address ranges; this
+ * check is the guard that keeps http:// to the home network.
+ */
+const v4 = h => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return null;
+  const b = m.slice(1).map(Number);
+  return b.every(x => x <= 255) ? b : null;
+};
+export function isPrivateHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!h) return false;
+  const ip = v4(h);
+  if (ip) {
+    const [a, b] = ip;
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+      || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (h.includes(':')) {
+    // IPv6: loopback, unique-local fc00::/7, link-local fe80::/10, and an IPv4 address mapped
+    // into IPv6 (::ffff:192.168.1.2, which the URL parser writes as ::ffff:c0a8:102).
+    if (h === '::1') return true;
+    if (/^f[cd][0-9a-f]{0,2}:/.test(h)) return true;
+    if (/^fe[89ab][0-9a-f]?:/.test(h)) return true;
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+    if (mapped) {
+      const hi = parseInt(mapped[1], 16), lo = parseInt(mapped[2], 16);
+      return isPrivateHost(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    return false;
+  }
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  // A single label (`ollama`, `nas`) only resolves through the LAN's own DNS. Not an IPv4 address
+  // in another spelling: the URL parser has already turned those into dotted quads.
+  return /^[a-z0-9-]+$/.test(h) && !/^\d+$/.test(h);
+}
+
+/** Whether the phone may call `url` (already validated): https:// anywhere, http:// only on the home network. */
+export function phoneMayCall(url) {
+  let u;
+  try { u = new URL(String(url || '').trim()); } catch { return false; }
+  if (u.protocol === 'https:') return true;
+  return u.protocol === 'http:' && isPrivateHost(u.hostname);
 }

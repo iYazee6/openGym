@@ -1,0 +1,74 @@
+package ch.duartesantos.opengym.wear
+
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.graphics.drawable.Icon
+import androidx.wear.watchface.complications.data.ComplicationData
+import androidx.wear.watchface.complications.data.ComplicationType
+import androidx.wear.watchface.complications.data.LongTextComplicationData
+import androidx.wear.watchface.complications.data.MonochromaticImage
+import androidx.wear.watchface.complications.data.MonochromaticImageComplicationData
+import androidx.wear.watchface.complications.data.PlainComplicationText
+import androidx.wear.watchface.complications.data.RangedValueComplicationData
+import androidx.wear.watchface.complications.data.ShortTextComplicationData
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
+import androidx.wear.watchface.complications.datasource.ComplicationRequest
+
+/**
+ * The complication (the Apple Watch's complications): during a workout the work sets done as a
+ * ring with "3/12"; otherwise the week streak. A tap opens the app.
+ */
+class ProgressComplicationService : ComplicationDataSourceService() {
+    override fun onComplicationRequest(request: ComplicationRequest, listener: ComplicationRequestListener) {
+        listener.onComplicationData(dataFor(this, request.complicationType, WearStore.peek(this), PhoneLink.waitingSetsNow(this)))
+    }
+
+    override fun getPreviewData(type: ComplicationType): ComplicationData? =
+        dataFor(this, type, SessionState(streak = Streak(12, true), synced = true))
+
+    companion object {
+        /** `unsent`: sets logged here the phone has not stored yet; the title says "↑3" while they wait. */
+        fun dataFor(ctx: Context, type: ComplicationType, s: SessionState, unsent: Int = 0): ComplicationData? {
+            val c = Lang.wrap(ctx, s.settings.lang)
+            val tap = PendingIntent.getActivity(ctx, 1, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+            val icon = MonochromaticImage.Builder(Icon.createWithResource(ctx, R.drawable.ic_barbell)).build()
+            val (done, total) = SessionCore.progress(s)
+            val running = s.workout != null && total > 0
+            val weeks = s.streak?.weeks ?: 0
+            val short = if (running) "$done/$total" else weeks.toString()
+            val desc = PlainComplicationText.Builder(ComplicationWords.line(running, done, total, weeks, unsent,
+                setsOf = { d, t -> c.getString(R.string.sets_of, d, t) }, streak = c.getString(R.string.week_streak),
+                waiting = c.getString(R.string.waiting_sync))).build()
+            val title = PlainComplicationText.Builder(if (unsent > 0) "↑$unsent" else c.getString(if (running) R.string.sets else R.string.week_streak)).build()
+            return when (type) {
+                ComplicationType.RANGED_VALUE ->
+                    RangedValueComplicationData.Builder(
+                        value = if (running) done.toFloat() else weeks.coerceAtMost(52).toFloat(),
+                        min = 0f, max = if (running) total.toFloat() else 52f, contentDescription = desc)
+                        .setText(PlainComplicationText.Builder(short).build())
+                        .apply { if (unsent > 0) setTitle(title) }
+                        .setMonochromaticImage(icon).setTapAction(tap).build()
+                ComplicationType.SHORT_TEXT ->
+                    ShortTextComplicationData.Builder(PlainComplicationText.Builder(short).build(), desc)
+                        .setTitle(title).setMonochromaticImage(icon).setTapAction(tap).build()
+                ComplicationType.LONG_TEXT ->
+                    LongTextComplicationData.Builder(desc, desc)
+                        .setMonochromaticImage(icon).setTapAction(tap).build()
+                ComplicationType.MONOCHROMATIC_IMAGE ->
+                    MonochromaticImageComplicationData.Builder(icon, desc).setTapAction(tap).build()
+                else -> null
+            }
+        }
+    }
+}
+
+/**
+ * The complication's one line, said in full (the long-text slot shows it, the others read it to
+ * TalkBack): "3 of 12 sets" during a workout, else "Week streak: 4", and what still waits for the phone.
+ */
+object ComplicationWords {
+    fun line(running: Boolean, done: Int, total: Int, weeks: Int, unsent: Int,
+             setsOf: (Int, Int) -> String, streak: String, waiting: String): String =
+        (if (running) setsOf(done, total) else "$streak: $weeks") + (if (unsent > 0) ", $waiting $unsent" else "")
+}

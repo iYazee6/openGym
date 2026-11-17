@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextTrainingDay, modeOf, isTimed, fmtSec, setLabel, defaultConfig, buildSets, freestyleConfig, exLine, workoutVolume, bestWeightFor, bestWeightForEntry, completedRepsOf, metricRowsForEntry, effortOf, stepEffort, capEffort, isBw, isPerSide, sideReps, repStep, cascadeWeight, insertWarmupRow, makeWarmupAt, canBeWarmup, makeWorkAt, removeRowAt, removeLastSet, setSpanAt, workSetsDone, setsDone, setsDoneActive, setUnits, doneUnits, setUnitsTotal, pairAdjacent, unpairSuperset, supersetUnits, sessionSections, applyIntensifierPlan, pinnedNoteFor, exNoteFor, effectiveRoutineIds, effectiveRoutines, effectiveRoutineId, effectiveRoutine, lastEntryFor, entryExcluded, entryRoutineId, setsRepsOf } from './history.js'
+import { nextTrainingDay, modeOf, isTimed, fmtSec, setLabel, defaultConfig, pickedExerciseConfig, lastLoggedShape, buildSets, freestyleConfig, exLine, workoutVolume, bestWeightFor, bestWeightForEntry, completedRepsOf, metricRowsForEntry, effortOf, stepEffort, capEffort, isBw, isPerSide, sideReps, repStep, cascadeWeight, insertWarmupRow, makeWarmupAt, canBeWarmup, makeWorkAt, removeRowAt, removeLastSet, setSpanAt, workSetsDone, setsDone, setsDoneActive, setUnits, doneUnits, setUnitsTotal, pairAdjacent, unpairSuperset, supersetUnits, sessionSections, applyIntensifierPlan, pinnedNoteFor, exNoteFor, effectiveRoutineIds, effectiveRoutines, effectiveRoutineId, effectiveRoutine, lastEntryFor, entryExcluded, entryRoutineId, setsRepsOf, newExDefaultsOf, NEW_EX_DEFAULTS } from './history.js'
 import { makeSideSet, setSideField, toggleSide, WEIGHT_ORIGIN_MANUAL } from './workout-model.js'
 import { EXDB } from './exercises.js'
 import { todayISO, isoOf } from './format.js'
@@ -334,6 +334,70 @@ describe('defaultConfig', () => {
     expect(defaultConfig(BW, 'time')).toEqual({ sets: 3, sec: 45, weight: 0, mode: 'time', bodyweight: true })
     expect('bodyweight' in defaultConfig(LIFT)).toBe(false)
   })
+  it('starts a catalogue hold as a timed hold, and leaves how a saved entry reads alone', () => {
+    const PLANK = '0463'
+    expect(defaultConfig(PLANK)).toEqual({ sets: 3, sec: 45, weight: 0, mode: 'time', bodyweight: true })
+    expect(defaultConfig(PLANK, 'reps')).toMatchObject({ reps: 10, mode: 'reps' })
+    expect(modeOf({ id: PLANK })).toBe('reps')
+    expect(defaultConfig('0464').mode).toBe('reps') // a plank with a twist moves
+  })
+})
+
+describe('pickedExerciseConfig', () => {
+  it('starts a one-arm or one-leg exercise per side, ten reps a side', () => {
+    // 4837 dumbbell single arm bent over row, 1027 assisted single leg press
+    expect(pickedExerciseConfig('4837')).toMatchObject({ mode: 'reps', side: true, reps: 20 })
+    expect(isPerSide(pickedExerciseConfig('1027'))).toBe(true)
+    expect(pickedExerciseConfig('4837', 'time')).toMatchObject({ mode: 'time', side: true, sec: 45 })
+  })
+  it('leaves everything else as defaultConfig has it', () => {
+    expect(pickedExerciseConfig('1801')).toEqual(defaultConfig('1801'))   // one arm lat stretch
+    expect(pickedExerciseConfig('0667')).toEqual(defaultConfig('0667'))   // raise single leg push up
+    expect(pickedExerciseConfig(LIFT)).toEqual(defaultConfig(LIFT))
+    expect(pickedExerciseConfig(CARDIO)).toEqual(defaultConfig(CARDIO))
+  })
+  // Q10: the profile's own start, 2 × 8 instead of 3 × 10.
+  it('starts with the profile\'s own sets and reps when it picked some, cardio and saved targets aside', () => {
+    const S = { newExDefaults: { sets: 2, reps: 8, sec: 30 } }
+    expect(pickedExerciseConfig(LIFT, undefined, S)).toMatchObject({ mode: 'reps', sets: 2, reps: 8 })
+    expect(pickedExerciseConfig(LIFT, 'time', S)).toMatchObject({ mode: 'time', sets: 2, sec: 30 })
+    expect(pickedExerciseConfig('4837', undefined, S)).toMatchObject({ side: true, sets: 2, reps: 16 })   // 8 a side
+    expect(pickedExerciseConfig(CARDIO, undefined, S)).toEqual(defaultConfig(CARDIO))
+    expect(defaultConfig(LIFT)).toMatchObject({ sets: 3, reps: 10 })                                       // the base under saved targets stays
+    expect(pickedExerciseConfig(LIFT, undefined, {})).toEqual(defaultConfig(LIFT))
+  })
+  it('reads the pick defensively: clamped, rounded, the rest from 3 × 10', () => {
+    expect(newExDefaultsOf({})).toEqual(NEW_EX_DEFAULTS)
+    expect(newExDefaultsOf({ newExDefaults: { sets: 99, reps: 2.6, sec: 'x' } })).toEqual({ sets: 10, reps: 3, sec: 45 })
+    expect(newExDefaultsOf({ newExDefaults: { sets: 0, reps: -1, sec: 2 } })).toEqual(NEW_EX_DEFAULTS)
+    expect(newExDefaultsOf({ newExDefaults: 'nope' })).toEqual(NEW_EX_DEFAULTS)
+  })
+  it('keeps defaultConfig flat, so a saved target without the flag stays one row a set', () => {
+    expect('side' in defaultConfig('4837')).toBe(false)
+  })
+  it('starts the way the exercise was logged last time: a timed hold, per side, or both', () => {
+    const last = sets => ({ workouts: [{ d: '2026-01-01', entries: [{ id: LIFT, sets }] }] })
+    const held = last([{ sec: 40, done: true }, { sec: 30, done: true }])
+    expect(lastLoggedShape(held, LIFT)).toEqual({ time: true, side: false })
+    expect(pickedExerciseConfig(LIFT, undefined, held)).toEqual(defaultConfig(LIFT, 'time'))
+    const sided = last([1, 2].map(() => ({ ...makeSideSet({ w: 10, r: 16 }), done: true })))
+    expect(pickedExerciseConfig(LIFT, undefined, sided)).toMatchObject({ mode: 'reps', side: true, reps: 20 })
+    const both = last([{ sec: 30, done: true, sides: { L: { sec: 30 }, R: { sec: 30 } } }])
+    expect(pickedExerciseConfig(LIFT, undefined, both)).toMatchObject({ mode: 'time', side: true, sec: 45 })
+  })
+  it('reads only the work sets, and lets a named mode win', () => {
+    const S = { workouts: [{ d: '2026-01-01', entries: [{ id: LIFT, sets: [{ w: 20, r: 10, phase: 'warmup', warmup: true, done: true }, { sec: 40, done: true }] }] }] }
+    expect(lastLoggedShape(S, LIFT).time).toBe(true)
+    expect(pickedExerciseConfig(LIFT, 'reps', S)).toEqual(defaultConfig(LIFT, 'reps'))
+  })
+  it('changes nothing with no history, a rep history, or for cardio', () => {
+    expect(lastLoggedShape({ workouts: [] }, LIFT)).toEqual({ time: false, side: false })
+    const reps = { workouts: [{ d: '2026-01-01', entries: [{ id: LIFT, sets: [{ w: 60, r: 8, done: true }] }] }] }
+    expect(pickedExerciseConfig(LIFT, undefined, reps)).toEqual(defaultConfig(LIFT))
+    const run = { workouts: [{ d: '2026-01-01', entries: [{ id: CARDIO, sets: [{ sec: 600, done: true }] }] }] }
+    expect(pickedExerciseConfig(CARDIO, undefined, run)).toEqual(defaultConfig(CARDIO))
+    expect(pickedExerciseConfig('4837', undefined, reps)).toMatchObject({ side: true })   // one arm still per side
+  })
 })
 
 /* ---------- bodyweight and per side (issues #31/#32/#33) ---------- */
@@ -492,6 +556,14 @@ describe('freestyleConfig', () => {
     const rows = [{ w: 55, r: 10, done: false }]
     expect(insertWarmupRow(rows, 'reps', bench, 5, 45)[0].w).toBe(45)
     expect(insertWarmupRow(rows, 'reps', bench, 5)[0].w).toBe(25)
+  })
+
+  it('an added warm-up on an assistance machine gives more help, ramping down to the work weight', () => {
+    // 0017 assisted pull-up: 40 (1.5 × 25 rounded up to the step), then halfway down to 35
+    const rows = [{ w: 25, r: 10, done: false }]
+    const one = insertWarmupRow(rows, 'reps', { id: '0017' }, 5)
+    expect(one[0].w).toBe(40)
+    expect(insertWarmupRow(one, 'reps', { id: '0017' }, 5)[1].w).toBe(35)
   })
 
   it('caps the planned warm-ups and ignores nonsense values', () => {
@@ -727,6 +799,21 @@ describe('buildSets', () => {
 })
 
 describe('applyIntensifierPlan', () => {
+  // Reddit: "dropsets only on the last set, applied in the plan".
+  it("drops on the last work set only with on: 'last', warm-ups and earlier sets straight", () => {
+    const sets = [{ w: 40, r: 8, done: false, phase: 'warmup' }, { w: 100, r: 8, done: false }, { w: 100, r: 8, done: false }, { w: 100, r: 8, done: false }]
+    const out = applyIntensifierPlan(sets, { intensifier: { type: 'dropset', count: 2, pct: 20, on: 'last' } })
+    expect(out.slice(0, 3)).toEqual(sets.slice(0, 3))
+    expect(out[3]).toEqual({ w: 100, r: 8, done: false, type: 'dropset', drops: [{ w: 80, r: 8 }, { w: 64, r: 8 }] })
+  })
+
+  it("a per-side last set drops on both sides with on: 'last'", () => {
+    const out = applyIntensifierPlan([makeSideSet({ w: 20, r: 8, done: false }), makeSideSet({ w: 20, r: 8, done: false })], { side: true, intensifier: { type: 'dropset', count: 1, pct: 25, on: 'last' } })
+    expect(out[0].sides.L.drops).toBeUndefined()
+    expect(out[1].sides.L.drops).toEqual([{ w: 15, r: 4 }])
+    expect(out[1].sides.R.drops).toEqual([{ w: 15, r: 4 }])
+  })
+
   it('pre-fills every work row with a chain of drops, each pct% lighter than the one before', () => {
     const sets = [{ w: 100, r: 8, done: false }, { w: 100, r: 8, done: false }]
     const out = applyIntensifierPlan(sets, { intensifier: { type: 'dropset', count: 2, pct: 20 } })
@@ -929,46 +1016,6 @@ describe('sessionSections', () => {
     const entries = [{ id: 'a', sg: 'x' }, { id: 'b', sg: 'x' }, { id: 'c' }]
     expect(sessionSections(entries)).toEqual([{ rid: null, items: [0, 1, 2], units: supersetUnits(entries) }])
     expect(sessionSections(undefined)).toEqual([])
-  })
-})
-
-describe('superset editing', () => {
-  it('pairs adjacent entries without mutating the source and keeps the display units contiguous', () => {
-    const entries = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
-    const paired = pairAdjacent(entries, 1, 2, 'sg-new')
-
-    expect(paired).toEqual([{ id: 'a' }, { id: 'b', sg: 'sg-new' }, { id: 'c', sg: 'sg-new' }])
-    expect(entries).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
-    expect(supersetUnits(paired)).toEqual([[0], [1, 2]])
-  })
-
-  it('merges both contiguous groups when their boundary entries are paired', () => {
-    const entries = [
-      { id: 'a', sg: 'left' }, { id: 'b', sg: 'left' },
-      { id: 'c', sg: 'right' }, { id: 'd', sg: 'right' }
-    ]
-    const merged = pairAdjacent(entries, 1, 2)
-
-    expect(merged.map(e => e.sg)).toEqual(['left', 'left', 'left', 'left'])
-    expect(entries.map(e => e.sg)).toEqual(['left', 'left', 'right', 'right'])
-  })
-
-  it('unpairs one entry and removes sg values left without an adjacent partner', () => {
-    const entries = [
-      { id: 'a', sg: 'group' }, { id: 'b', sg: 'group' }, { id: 'c', sg: 'group' },
-      { id: 'd', sg: 'orphan' }
-    ]
-    const unpaired = unpairSuperset(entries, 1)
-
-    expect(unpaired).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }])
-    expect(entries.map(e => e.sg)).toEqual(['group', 'group', 'group', 'orphan'])
-  })
-
-  it('rejects a non-adjacent pairing request', () => {
-    const entries = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
-
-    expect(() => pairAdjacent(entries, 0, 2, 'sg-invalid')).toThrow(/adjacent/)
-    expect(entries).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
   })
 })
 
@@ -1236,56 +1283,6 @@ describe('exNoteFor', () => {
   })
 })
 
-describe('nextTrainingDay', () => {
-  // 2026-08-18 is a Tuesday; the week map is keyed by getDay(), so 0 is Sunday.
-  const TUE = '2026-08-18'
-  const base = (over = {}) => ({
-    dayPlan: {},
-    routines: [{ id: 'r1', name: 'A', ex: [{ id: '0001' }] }, { id: 'r2', name: 'B', ex: [{ id: '0002' }] }],
-    week: {},
-    ...over
-  })
-
-  it('finds the next scheduled day and names its routine', () => {
-    const S = base({ week: { 4: 'r2' } })                 // Thursday
-    expect(nextTrainingDay(S, TUE)).toMatchObject({ iso: '2026-08-20', weekday: 4 })
-    expect(nextTrainingDay(S, TUE).routine.name).toBe('B')
-  })
-
-  it('looks forward only — today itself is never the answer', () => {
-    // Only Tuesday is scheduled and today is Tuesday, so the next one is a week out. (The UI
-    // cannot reach this: a day with a session takes the other branch and never asks.)
-    const S = base({ week: { 2: 'r1' } })
-    expect(nextTrainingDay(S, TUE)).toMatchObject({ iso: '2026-08-25', weekday: 2 })
-  })
-
-  it('wraps around the end of the week', () => {
-    const S = base({ week: { 1: 'r1' } })                 // Monday, six days on
-    expect(nextTrainingDay(S, TUE)).toMatchObject({ iso: '2026-08-24', weekday: 1 })
-  })
-
-  it('is null when every day is rest', () => {
-    expect(nextTrainingDay(base(), TUE)).toBeNull()
-  })
-
-  it('skips a day whose routine no longer exists', () => {
-    const S = base({ week: { 3: 'gone', 5: 'r1' } })
-    expect(nextTrainingDay(S, TUE)).toMatchObject({ iso: '2026-08-21', weekday: 5 })
-  })
-
-  it('skips a routine with no exercises — starting it would open an empty session', () => {
-    const S = base({ routines: [{ id: 'r1', name: 'A', ex: [] }, { id: 'r2', name: 'B', ex: [{ id: '1' }] }], week: { 3: 'r1', 5: 'r2' } })
-    expect(nextTrainingDay(S, TUE)).toMatchObject({ weekday: 5 })
-  })
-
-  it('respects a per-date override in both directions', () => {
-    const moved = base({ week: {}, dayPlan: { '2026-08-19': 'r1' } })
-    expect(nextTrainingDay(moved, TUE)).toMatchObject({ iso: '2026-08-19' })
-    const off = base({ week: { 3: 'r1', 5: 'r2' }, dayPlan: { '2026-08-19': 'rest' } })
-    expect(nextTrainingDay(off, TUE)).toMatchObject({ weekday: 5 })
-  })
-})
-
 /* ---------- one-sided (unilateral) sets, logged per side (issue #60) ---------- */
 
 // A per-side row carries its two sides and a scalar aggregate. These pin that the display shows
@@ -1461,6 +1458,16 @@ describe('effectiveRoutineIds — coach queue', () => {
     expect(effectiveRoutineIds(S({ dayPlan: { '2026-09-11': 'd1', '2026-09-12': 'd2' }, week: { 3: 'd1' } }), TODAY, TODAY)).toEqual([])
   })
 
+  it('a pin is read as of the day asked about: a session logged for a later date has not fulfilled it yet', () => {
+    // The DONE RULE stops at today (queue.js). On Wednesday a D1 dated Thursday, started before
+    // the apply, has not happened, so Friday's pin still holds; asked on Friday, as the reminder
+    // builder asks each date, it is fulfilled and the next session floats in.
+    const thu = { ...done('d1'), d: '2026-09-10', start: SINCE - 1 }
+    const s = S({ dayPlan: { '2026-09-11': 'd1' }, workouts: [thu] })
+    expect(effectiveRoutineIds(s, '2026-09-11', TODAY)).toEqual(['d1'])
+    expect(effectiveRoutineIds(s, '2026-09-11', '2026-09-11')).toEqual(['d2'])
+  })
+
   it('a plain routine override is still single-pick, and \'rest\' still wins over a pin', () => {
     expect(effectiveRoutineIds(S({ dayPlan: { [TODAY]: 'own' }, week: { 3: ['own'] } }), TODAY, TODAY)).toEqual(['own'])
     expect(effectiveRoutineIds(S({ dayPlan: { [TODAY]: 'rest', '2026-09-11': 'd1' } }), TODAY, TODAY)).toEqual([])
@@ -1612,19 +1619,32 @@ describe('switching a row between warm-up and work', () => {
     const rows = [{ w: 40, r: 8, phase: 'warmup', warmup: true, done: true }, { w: 100, r: 5, done: true, at: 7 }, { w: 100, r: 5, done: false, type: 'dropset', drops: [{ w: 80, r: 4 }], rir: 2 }]
     const plain = [...rows.slice(0, 2), { w: 100, r: 5, done: false, rir: 2 }]
     const next = makeWarmupAt(plain, 2)
-    expect(next).toEqual([rows[0], { w: 100, r: 5, done: false, phase: 'warmup', warmup: true }, rows[1]])
-    expect(makeWarmupAt(rows, 1)[1]).toEqual({ w: 100, r: 5, done: true, phase: 'warmup', warmup: true, at: 7 })
+    expect(next).toEqual([rows[0], { w: 100, r: 5, done: false, phase: 'warmup', warmup: true, edited: true }, rows[1]])
+    expect(makeWarmupAt(rows, 1)[1]).toEqual({ w: 100, r: 5, done: true, phase: 'warmup', warmup: true, edited: true, at: 7 })
     expect(makeWarmupAt(rows, 0)).toBe(rows)
   })
 
-  it('makeWarmupAt leaves drop, rest-pause and per-side rows as they are', () => {
+  it('makeWarmupAt leaves drop and rest-pause rows as they are', () => {
     const drop = [{ w: 60, r: 8, done: true }, { w: 100, r: 5, done: true, type: 'dropset', drops: [{ w: 80, r: 4 }] }]
     expect(makeWarmupAt(drop, 1)).toBe(drop)
     const rp = [{ w: 60, r: 8, done: true }, { w: 100, r: 12, done: true, type: 'restpause', clusters: [{ r: 4, rest: 15 }] }]
     expect(makeWarmupAt(rp, 1)).toBe(rp)
-    const side = [{ w: 30, r: 6, done: true }, { w: 30, r: 11, done: false, sides: { L: { w: 30, r: 5, done: true }, R: { w: 0, r: 6, done: false } } }]
-    expect(makeWarmupAt(side, 1)).toBe(side)
-    expect([canBeWarmup(drop[1]), canBeWarmup(rp[1]), canBeWarmup(side[1]), canBeWarmup(drop[0])]).toEqual([false, false, false, true])
+    const sideDrop = [{ w: 30, r: 6 }, { w: 30, r: 10, type: 'dropset', sides: { L: { w: 30, r: 5, type: 'dropset', drops: [{ w: 20, r: 4 }] }, R: { w: 30, r: 5 } } }]
+    expect(makeWarmupAt(sideDrop, 1)).toBe(sideDrop)
+    expect([canBeWarmup(drop[1]), canBeWarmup(rp[1]), canBeWarmup(sideDrop[1]), canBeWarmup(drop[0])]).toEqual([false, false, false, true])
+  })
+
+  // #575: the set menu of a per-side exercise had no "Make it a warm-up set".
+  it('a per-side set becomes a per-side warm-up, each side kept, and goes back with nothing lost', () => {
+    const side = { w: 30, r: 11, done: false, rir: 1, sides: { L: { w: 30, r: 5, done: true, rir: 2 }, R: { w: 32.5, r: 6, done: false, rir: 1 } } }
+    const rows = [{ w: 30, r: 10, done: true, sides: { L: { w: 30, r: 5, done: true }, R: { w: 30, r: 5, done: true } } }, side]
+    expect(canBeWarmup(side)).toBe(true)
+    const warm = makeWarmupAt(rows, 1)
+    expect(warm[0]).toEqual({ phase: 'warmup', warmup: true, edited: true, sides: { L: { w: 30, r: 5, done: true }, R: { w: 32.5, r: 6, done: false } }, r: 11, w: 32.5, done: false })
+    expect(warm[1]).toBe(rows[0])
+    const back = makeWorkAt(warm, 0)
+    expect(back[0]).toEqual({ sides: { L: { w: 30, r: 5, done: true }, R: { w: 32.5, r: 6, done: false } }, r: 11, w: 32.5, done: false })
+    expect(rows[1]).toEqual(side)   // the input is never written to
   })
 
   it('a warm-up made one is left out of the best weight and the work-set count', () => {

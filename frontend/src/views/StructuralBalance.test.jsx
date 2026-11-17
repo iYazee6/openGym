@@ -27,7 +27,7 @@ function render(View = StructuralBalance) {
 
 function setDoneSet(w, r) { return { done: true, w, r } }
 function workoutAt(id, start, sets) {
-  return { d: new Date(start).toISOString(), start, entries: [{ id, sets }] }
+  return { id: 'w-' + id, d: new Date(start).toISOString(), start, entries: [{ id, sets }] }
 }
 
 beforeEach(() => {
@@ -108,6 +108,15 @@ describe('StructuralBalance view', () => {
       expect(name.textContent.length).toBeGreaterThan(0)
     }
     expect(host.querySelector('[data-role-id="narrowBench"] [data-exercise-name]').textContent).toBe('barbell close-grip bench press')
+  })
+
+  it('every lift\'s Change exercise says which lift it is for (P4)', () => {
+    const host = render()
+    const btns = [...host.querySelectorAll('[data-role-id] button')].filter(b => b.textContent.includes('Change exercise'))
+    expect(btns.length).toBeGreaterThan(3)
+    const names = btns.map(b => b.getAttribute('aria-label'))
+    expect(new Set(names).size).toBe(names.length)
+    expect(names.every(n => /\S: Change exercise$/.test(n))).toBe(true)
   })
 
   it('picking a role\'s own default exercise does not mark it custom', () => {
@@ -200,13 +209,12 @@ describe('StructuralBalance view', () => {
 })
 
 describe('the way in from Stats', () => {
-  it('is a card like the others that opens the screen, once there is a workout to read', () => {
+  it('is a row in Stats\' list of pages that opens the screen, once there is a workout to read', () => {
     const host = render(Stats)
-    const card = [...host.querySelectorAll('.card')].find(c => c.querySelector('h2')?.textContent === 'Structural balance')
-    expect(card).toBeTruthy()
-    expect(card.textContent).toContain('See which lift is holding back the rest.')
-    const open = [...card.querySelectorAll('button')].find(b => b.textContent.includes('Open'))
-    act(() => open.click())
+    const row = [...host.querySelectorAll('[data-stats-links] button')].find(b => b.querySelector('.lrow-t')?.textContent === 'Structural balance')
+    expect(row).toBeTruthy()
+    expect(row.textContent).toContain('See which lift is holding back the rest.')
+    act(() => row.click())
     expect(navSpy).toHaveBeenCalledWith('/structural-balance')
   })
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dayReminderPush, restTimerPush, testPush } from '../push-messages.js';
+import { dayReminderPush, restTimerPush, routineEmoji, testPush, cleanNext } from '../push-messages.js';
 
 test('localizes every server-generated notification in pt-BR', () => {
   assert.deepEqual(restTimerPush('pt-BR'), {
@@ -20,8 +20,62 @@ test('localizes every server-generated notification in pt-BR', () => {
   });
 });
 
+test('localizes every server-generated notification in id', () => {
+  assert.deepEqual(restTimerPush('id'), {
+    title: 'Istirahat selesai 💪',
+    body: 'Saatnya set berikutnya.',
+    tag: 'rest-timer',
+  });
+  assert.deepEqual(testPush('id'), {
+    title: 'openGym',
+    body: 'Notifikasi uji coba ✅ Begini tampilan notifikasinya.',
+    tag: 'test',
+  });
+  assert.deepEqual(dayReminderPush('id', { name: 'Latihan A', emoji: '💪' }), {
+    title: '💪 Latihan A hari ini',
+    body: 'Sudah ada di jadwalmu. Ayo mulai latihan 💪',
+    tag: 'day-reminder',
+  });
+  assert.deepEqual(dayReminderPush('id', null), {
+    title: 'Jadwal latihan hari ini',
+    body: 'Sudah ada di jadwalmu. Ayo mulai latihan 💪',
+    tag: 'day-reminder',
+  });
+});
+
 test('keeps the existing English copy as the fallback', () => {
   assert.deepEqual(restTimerPush('fr'), restTimerPush('en'));
   assert.equal(dayReminderPush('unknown', null).title, 'Workout planned today');
   assert.equal(testPush(undefined).body, 'Test notification ✅ This is what alerts look like.');
+});
+
+// Routines stopped storing a literal emoji when the glyph picker landed: `emoji` now holds an
+// icon key the app renders as an SVG. A notification has no SVG, so before this the reminder
+// read "dumbbell Push today" — the key's own name, on the lock screen.
+test('renders a routine glyph key as an emoji, never as its name', () => {
+  assert.equal(routineEmoji('dumbbell'), '🏋️');
+  assert.equal(routineEmoji('figureRun'), '🏃');
+  assert.equal(routineEmoji('legs'), '🦵');
+  assert.equal(
+    dayReminderPush('pt-BR', { name: 'Costas e Bíceps', emoji: 'dumbbell' }).title,
+    '🏋️ Costas e Bíceps hoje',
+  );
+});
+
+test('leaves a literal emoji alone and falls back for anything else', () => {
+  assert.equal(routineEmoji('💪'), '💪');
+  assert.equal(routineEmoji('🏋️‍♀️'), '🏋️‍♀️');
+  // An icon key the picker no longer offers is still ASCII, so it falls back to the default
+  // rather than reaching the phone as a word.
+  assert.equal(routineEmoji('trophy'), '🏋️');
+  assert.equal(routineEmoji(''), '🏋️');
+  assert.equal(routineEmoji(undefined), '🏋️');
+});
+
+test('the rest push names the next set when the app sent one, as one clean line', () => {
+  assert.deepEqual(restTimerPush('de', 'Bankdrücken, 80 kg × 8'), { title: restTimerPush('de').title, body: 'Bankdrücken, 80 kg × 8', tag: 'rest-timer' });
+  assert.equal(restTimerPush('en', '   ').body, restTimerPush('en').body);
+  assert.equal(restTimerPush('en', { evil: true }).body, restTimerPush('en').body);
+  assert.equal(cleanNext('Plank,\n45 s\u202e'), 'Plank, 45 s');
+  assert.equal(cleanNext('x'.repeat(300)).length, 120);
 });

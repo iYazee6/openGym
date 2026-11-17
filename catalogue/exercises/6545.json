@@ -3,13 +3,15 @@
   "name": "handstand hold on wall",
   "bodyPart": "shoulders",
   "equipment": "body weight",
-  "target": "delts",
+  "target": "front delts",
   "secondaryMuscles": [
     "triceps",
     "upper back",
-    "core"
+    "core",
+    "side delts"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A wall-supported handstand held in place, building shoulder strength, balance and body control.",
   "instructions": [
     "Place your hands on the floor a short distance from a wall.",

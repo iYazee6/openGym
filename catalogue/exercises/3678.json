@@ -1,13 +1,13 @@
 {
   "id": "3678",
   "name": "high jump rope",
-  "bodyPart": "cardio",
+  "bodyPart": "full body",
   "equipment": "rope",
   "target": "cardiovascular system",
   "secondaryMuscles": [
     "calves",
     "quadriceps",
-    "shoulders"
+    "front delts"
   ],
   "category": "cardio",
   "description": "Jump rope with higher jumps to add power and intensity.",

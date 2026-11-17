@@ -20,15 +20,23 @@ describe('multi-muscle exercise metadata', () => {
     expect(MUSCLE_NAME.chest).toBe('Chest')
   })
 
+  // Since 1.4.5 the lats are their own muscle (#638), apart from the upper back (#607 named them
+  // together while the map had one region for both).
+  it('counts the lats as the lats and names them', () => {
+    expect(muscleGroupsOf({ tg: 'lats', sm: ['latissimus dorsi'] })).toEqual(['lats'])
+    expect(loadOf([{ id: 'inline', ex: { primaries: ['lats'] }, sets: 3 }])).toEqual({ lats: 3 })
+    expect(MUSCLE_NAME.lats).toBe('Lats')
+  })
+
   it('falls back to the legacy body-part map when an optional multi-group field is empty', () => {
-    expect(muscleGroupsOf({ bp: 'back', muscleGroups: [] })).toEqual(['upper-back', 'lower-back'])
+    expect(muscleGroupsOf({ bp: 'back', muscleGroups: [] })).toEqual(['lats', 'upper-back', 'lower-back'])
     expect(matchesMuscleGroups({ bp: 'back', muscleGroups: [] }, ['lower-back'])).toBe(true)
   })
 
   it('falls back consistently when explicit groups contain only unknown names', () => {
     const ex = { bp: 'back', muscleGroups: ['not-a-drawable-name'] }
-    expect(muscleGroupsOf(ex)).toEqual(['upper-back', 'lower-back'])
-    expect(musclesOf(ex)).toEqual({ 'upper-back': 0.75, 'lower-back': 0.25 })
+    expect(muscleGroupsOf(ex)).toEqual(['lats', 'upper-back', 'lower-back'])
+    expect(musclesOf(ex)).toEqual({ lats: 0.4, 'upper-back': 0.4, 'lower-back': 0.2 })
   })
 
   it('matches an exercise when any requested muscle group matches', () => {
@@ -52,14 +60,14 @@ describe('multi-muscle exercise metadata', () => {
 })
 
 describe('explicit muscle weights', () => {
-  const complete = { chest: 1, deltoids: 0.4, triceps: 0 }
+  const complete = { chest: 1, 'front-delts': 0.4, triceps: 0 }
 
   it('preserves every finite explicit weight from zero through one', () => {
     expect(muscleWeightsOf({ muscleWeights: complete })).toEqual(complete)
   })
 
   it('keeps effective stimulus positive-only', () => {
-    expect(musclesOf({ muscleWeights: complete })).toEqual({ chest: 1, deltoids: 0.4 })
+    expect(musclesOf({ muscleWeights: complete })).toEqual({ chest: 1, 'front-delts': 0.4 })
   })
 
   it('treats a recognized all-zero map as authoritative instead of using body-part defaults', () => {
@@ -79,11 +87,11 @@ describe('explicit muscle weights', () => {
 })
 
 describe('catalogue secondary muscles', () => {
-  it('maps a bench press to chest, triceps and deltoids', () => {
+  it('maps a bench press to chest, triceps and the front delts', () => {
     expect(musclesOf(EXIDX['0025'])).toMatchObject({
       chest: 1,
       triceps: 0.4,
-      deltoids: 0.4,
+      'front-delts': 0.4,
     })
   })
 
@@ -95,14 +103,27 @@ describe('catalogue secondary muscles', () => {
     })
   })
 
-  it('maps common row variations to the upper back, biceps and rear deltoids', () => {
+  it('maps common row variations to the upper back, lats, biceps and rear delts', () => {
     for (const id of ['0027', '0293', '0499', '0861']) {
       expect(musclesOf(EXIDX[id])).toMatchObject({
         'upper-back': 1,
         biceps: 0.4,
-        deltoids: 0.4,
+        'rear-delts': 0.4,
       })
+      expect(musclesOf(EXIDX[id]).lats).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('leg press and hack squat calves (#1034)', () => {
+  const legWork = EXDB.filter(e => /\b(leg press|hack squat)\b/i.test(e.n) && !/calf|calves|good morning|deadlift/i.test(e.n))
+  it('credits no calves to a leg press or hack squat', () => {
+    expect(legWork.length).toBeGreaterThan(30)
+    expect(legWork.filter(e => musclesOf(EXIDX[e.id]).calves).map(e => e.id)).toEqual([])
+  })
+
+  it('still credits calves to a calf press on the leg press machine', () => {
+    for (const id of ['0738', '1391', '1392', '2289']) expect(musclesOf(EXIDX[id]).calves).toBe(1)
   })
 })
 
@@ -112,8 +133,19 @@ describe('catalogue secondary additions', () => {
     const raw = EXDB.find(e => e.id === '0027')
     expect(raw.sm).not.toContain('rear deltoids')
     expect(smOf(raw)).toContain('rear deltoids')
-    // the alias collapses onto the deltoids slug in the canonical muscle map
-    expect(musclesOf(raw)).toHaveProperty('deltoids')
+    // the alias lands on the rear head in the canonical muscle map
+    expect(musclesOf(raw)).toHaveProperty('rear-delts')
+  })
+
+  it('credits the lower back on the deadlift variants the muscle map does not carry (#693)', () => {
+    for (const id of ['4133', '10189']) {
+      const raw = EXDB.find(e => e.id === id)
+      // the generated rows name no back muscle at all
+      expect([...raw.sm, raw.tg, raw.mg].join(' ')).not.toMatch(/back|spine|lats|traps/)
+      expect(smOf(raw)).toContain('lower back')
+      expect(muscleGroupsOf(EXIDX[id])).toContain('lower-back')
+      expect(musclesOf(EXIDX[id])).toHaveProperty('lower-back', 0.4)
+    }
   })
 })
 
@@ -125,11 +157,12 @@ describe('explicit multi-primary metadata', () => {
       primaries: ['chest', 'triceps', 'chest'], secondaries: ['deltoids', 'triceps']
     }
     expect(muscleGroupsOf(ex)).toEqual(['chest', 'triceps', 'deltoids'])
-    expect(musclesOf(ex)).toEqual({ chest: 1, triceps: 1, deltoids: 0.4 })
+    // A generic shoulder is all three heads, the front most.
+    expect(musclesOf(ex)).toEqual({ chest: 1, triceps: 1, 'front-delts': 0.4, 'side-delts': 0.24, 'rear-delts': 0.16 })
   })
 
   it('keeps the body-part fallback when primaries are absent or explicitly empty', () => {
-    const expected = { 'upper-back': 0.75, 'lower-back': 0.25 }
+    const expected = { lats: 0.4, 'upper-back': 0.4, 'lower-back': 0.2 }
     expect(musclesOf({ bp: 'back' })).toEqual(expected)
     expect(musclesOf({ bp: 'back', primaries: [] })).toEqual(expected)
   })
@@ -141,9 +174,9 @@ describe('explicit multi-primary metadata', () => {
   })
 
   it('provides a conservative Full body fallback for legacy custom exercises', () => {
-    expect(muscleGroupsOf({ bp: 'full body' })).toEqual(['chest', 'upper-back', 'gluteal', 'quadriceps', 'hamstring', 'abs'])
+    expect(muscleGroupsOf({ bp: 'full body' })).toEqual(['chest', 'lats', 'upper-back', 'gluteal', 'quadriceps', 'hamstring', 'abs'])
     expect(musclesOf({ bp: 'full body' })).toEqual({
-      chest: 0.2, 'upper-back': 0.2, gluteal: 0.2, quadriceps: 0.2, hamstring: 0.1, abs: 0.1
+      chest: 0.2, lats: 0.1, 'upper-back': 0.1, gluteal: 0.2, quadriceps: 0.2, hamstring: 0.1, abs: 0.1
     })
   })
 
@@ -265,15 +298,15 @@ describe('muscle balance windows and ranking', () => {
   })
 
   it('uses relative levels and canonical order to break load ties', () => {
-    const load = { chest: 2, deltoids: 2, biceps: 1 }
-    expect(rankOf(load).worked).toEqual(['deltoids', 'chest', 'biceps'])
-    expect(levelsOf(load)).toMatchObject({ deltoids: 4, chest: 4, biceps: 2, abs: 0 })
+    const load = { chest: 2, 'side-delts': 2, biceps: 1 }
+    expect(rankOf(load).worked).toEqual(['side-delts', 'chest', 'biceps'])
+    expect(levelsOf(load)).toMatchObject({ 'side-delts': 4, chest: 4, biceps: 2, abs: 0 })
   })
 
   it('keeps catalogue precedence and deleted-custom snapshot weights', () => {
     const known = { id: '0025', muscleGroups: ['quadriceps'], sets: [{ done: true }] }
     const deleted = { id: 'deleted', muscleSnapshot: { muscleWeights: { chest: 1 } }, sets: [{ done: true }] }
-    expect(loadOfWorkouts([{ entries: [known] }])).toEqual({ chest: 1, triceps: 0.4, deltoids: 0.4 })
+    expect(loadOfWorkouts([{ entries: [known] }])).toEqual({ chest: 1, triceps: 0.4, 'front-delts': 0.4 })
     expect(loadOfWorkouts([{ entries: [deleted] }])).toEqual({ chest: 1 })
   })
 })
@@ -292,5 +325,26 @@ describe('MUSCLE_NAME as i18n keys', () => {
       const missing = Object.values(MUSCLE_NAME).filter(name => !(name in mod.default))
       expect(missing, file).toEqual([])
     }
+  })
+})
+
+// Catalogue answers are remembered for Stats (muscleWeightsOf/musclesOf run per entry of every
+// workout); what a caller gets is still its own object, and anything not built in is read fresh.
+describe('remembered catalogue muscles', () => {
+  it('hands out an equal copy each time, so a caller changing it changes nothing', () => {
+    const ex = EXIDX['0025']
+    const a = musclesOf(ex), b = muscleWeightsOf(ex)
+    expect(Object.keys(a).length).toBeGreaterThan(0)
+    a.chest = 99; b.chest = 99; a.made_up = 1
+    expect(musclesOf(ex)).not.toBe(a)
+    expect(musclesOf(ex)).toEqual(musclesOf({ ...ex }))
+    expect(muscleWeightsOf(ex)).toEqual(muscleWeightsOf({ ...ex }))
+  })
+
+  it('reads an exercise of your own again after you edit it', () => {
+    const own = { id: 'c-q1', n: 'Mine', tg: 'pectorals' }
+    expect(Object.keys(musclesOf(own))).toEqual(['chest'])
+    own.tg = 'biceps'
+    expect(Object.keys(musclesOf(own))).toEqual(['biceps'])
   })
 })

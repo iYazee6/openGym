@@ -7,10 +7,11 @@
   "secondaryMuscles": [
     "glutes",
     "hamstrings",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A hold with your back to the floor, supported on your elbows. It strengthens the entire back of the body.",
   "instructions": [
     "Sit with legs extended and elbows under your shoulders.",

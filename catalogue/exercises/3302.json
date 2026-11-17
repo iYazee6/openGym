@@ -3,12 +3,14 @@
   "name": "handstand",
   "bodyPart": "upper arms",
   "equipment": "body weight",
-  "target": "triceps",
+  "target": "front delts",
   "secondaryMuscles": [
-    "shoulders",
-    "core"
+    "triceps",
+    "core",
+    "side delts"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A balance hold on the hands with the body upside down, usually against a wall to start. It trains the shoulders, triceps and core.",
   "instructions": [
     "Find an open space with enough room to perform a handstand.",

@@ -5,10 +5,13 @@
   "equipment": "ez barbell",
   "target": "triceps",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "forearms"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A skullcrusher that mixes a pullover motion, loading the triceps from a long position.",
   "instructions": [
     "Lie on a bench holding an ez bar above your chest.",

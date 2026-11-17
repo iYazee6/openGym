@@ -3,7 +3,7 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import Workout, { deleteActiveSet, undoDeleteSet, copyActiveSet, removeActiveExercise } from './Workout.jsx'
+import Workout, { deleteActiveSet, undoDeleteSet, copyActiveSet, removeActiveExercise, _resetHintQuiet, HINT_QUIET_MS } from './Workout.jsx'
 import { DEF, useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { closeOpenRow } from '../lib/use-swipe-row.js'
@@ -59,8 +59,18 @@ function swipe(target, x0, x1, { dy = 0, pointerType = 'touch', clickAfter = tru
   if (clickAfter) click(target)
 }
 
+// happy-dom 20.12+ runs Element.animate on its own clock, which fake timers do not move, so the
+// row's collapse never finished: end each animation on the faked clock instead.
+const fakeAnimate = () => vi.spyOn(Element.prototype, 'animate').mockImplementation(function (_, o) {
+  const a = { onfinish: null, cancel: () => clearTimeout(t) }
+  const t = setTimeout(() => a.onfinish?.(), o?.duration || 0)
+  return a
+})
+
 beforeEach(() => {
+  _resetHintQuiet()
   vi.useFakeTimers()
+  fakeAnimate()
   localStorage.clear()
   document.documentElement.dir = 'ltr'
   useUI.getState().stopRest()
@@ -79,6 +89,7 @@ afterEach(() => {
   useUI.getState().stopWork()
   vi.clearAllTimers()
   vi.useRealTimers()
+  vi.mocked(Element.prototype.animate).mockRestore?.()
   document.documentElement.dir = 'ltr'
 })
 
@@ -173,7 +184,7 @@ describe('a hold running while rows move', () => {
   it('writes what it held to its own row after a set above it was copied or removed', () => {
     setActive([timed([30, 40, 50])])
     render()
-    const play = () => [...container.querySelectorAll('button[aria-label="Start set"]')]
+    const play = () => [...container.querySelectorAll('button[aria-label*=": Start set"]')]
     act(() => play()[2].click())             // hold on the 50 s row
     expect(useUI.getState().work).not.toBeNull()
     act(() => { copyActiveSet(0, 0) })       // rows: 30 30 40 50, the hold's row is now 3
@@ -188,7 +199,7 @@ describe('a hold running while rows move', () => {
   it('stops when its own row is removed, and logs nothing anywhere', () => {
     setActive([timed([30, 40])])
     render()
-    act(() => [...container.querySelectorAll('button[aria-label="Start set"]')][1].click())
+    act(() => [...container.querySelectorAll('button[aria-label*=": Start set"]')][1].click())
     act(() => { deleteActiveSet(0, 1) })
     expect(useUI.getState().work).toBeNull()
     expect(toast()).toBe('Set 2 gone. Its timer stopped too.')
@@ -199,7 +210,7 @@ describe('a hold running while rows move', () => {
   it('moves the saved owner along too, so a reload brings the hold back to its own row', () => {
     setActive([timed([30, 40, 50])])
     render()
-    act(() => [...container.querySelectorAll('button[aria-label="Start set"]')][2].click())
+    act(() => [...container.querySelectorAll('button[aria-label*=": Start set"]')][2].click())
     expect(useUI.getState().work.owner).toMatchObject({ idx: 0, i: 2 })
     act(() => { copyActiveSet(0, 0) })
     expect(useUI.getState().work.owner).toMatchObject({ idx: 0, i: 3 })
@@ -236,7 +247,7 @@ describe('the swipe on a rendered set row', () => {
   let widthSpy
   beforeEach(() => { widthSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(360) })
   afterEach(() => widthSpy.mockRestore())
-  const repsPlus = k => swrows()[k].querySelectorAll('button[aria-label="Increase"]')[1]
+  const repsPlus = k => swrows()[k].querySelectorAll('button[aria-label*=": Increase"]')[1]
 
   it('wraps every set row when on, and none when off', () => {
     setActive([entry('1001', [row(80), row(80)])])
@@ -413,6 +424,21 @@ describe('the one-time hint', () => {
       act(() => vi.advanceTimersByTime(400))
       expect(sets().map(s => [s.w, s.done])).toEqual([[80, true], [70, false], [70, false]])
     } finally { widthSpy.mockRestore() }
+  })
+
+  // iOS UI test, CI 10-13: the nudge moved the first set while the test ticked it a second after
+  // the workout opened, and the tap landed where the circle had been. A touch puts it off.
+  it('waits for a quiet moment: not while the screen is being touched', () => {
+    setActive([entry('1001', [row(80), row(80)])], { hints: {} })
+    render()
+    act(() => vi.advanceTimersByTime(300))
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    act(() => vi.advanceTimersByTime(700))
+    expect(useUI.getState().swipeHint).toBeNull()
+    act(() => vi.advanceTimersByTime(HINT_QUIET_MS - 700 - 50))
+    expect(useUI.getState().swipeHint).toBeNull()
+    act(() => vi.advanceTimersByTime(100))
+    expect(useUI.getState().swipeHint).toMatchObject({ idx: 0, i: 0 })
   })
 
   it('stays away with swiping off, or once seen', () => {

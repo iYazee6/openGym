@@ -3,11 +3,12 @@
   "name": "suspender wide grip inverted row",
   "bodyPart": "back",
   "equipment": "suspension trainer",
-  "target": "lats",
+  "target": "upper back",
   "secondaryMuscles": [
+    "lats",
     "biceps",
     "rhomboids",
-    "rear deltoids",
+    "rear delts",
     "core",
     "forearms"
   ],

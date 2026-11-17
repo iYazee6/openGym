@@ -5,11 +5,14 @@
   "equipment": "dumbbell",
   "target": "pectorals",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "upper chest",
     "biceps"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A dumbbell fly where you rotate your wrists through the movement for a stronger chest squeeze.",
   "instructions": [
     "Lie on a bench with a dumbbell in each hand above your chest, palms facing in.",

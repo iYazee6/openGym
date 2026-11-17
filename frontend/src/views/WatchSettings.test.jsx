@@ -1,0 +1,162 @@
+// @vitest-environment happy-dom
+// Settings → Apple Watch: one Apple Health story. The phone's Apple Health switch (Settings → Integrations)
+// is the one switch; this page says what the watch makes of it and leads there.
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
+
+const mocks = vi.hoisted(() => ({ health: { on: false }, link: { paired: true, installed: true } }))
+vi.mock('../lib/health-sync.js', () => ({ loadHealth: async () => mocks.health, onHealthChange: () => () => {}, initHealthSync: () => {} }))
+vi.mock('../lib/watch-sync.js', () => ({ watchStatus: async () => mocks.link }))
+
+import WatchSettingsPage from './WatchSettings.jsx'
+import { useStore } from '../store/useStore.js'
+import { readWatchPrefs, writeWatchStatus, watchLinkState } from '../lib/watch-settings.js'
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
+let where = null
+function Where() { where = useLocation(); return null }
+
+async function mount() {
+  const el = document.createElement('div')
+  document.body.replaceChildren(el)
+  await act(async () => {
+    createRoot(el).render(<MemoryRouter initialEntries={['/settings/watch']}><Routes>
+      <Route path="/settings/watch" element={<WatchSettingsPage />} />
+      <Route path="*" element={<Where />} />
+    </Routes></MemoryRouter>)
+  })
+  return el
+}
+const row = (el, title) => [...el.querySelectorAll('.lrow')].find(r => r.querySelector('.lrow-t')?.textContent === title)
+
+beforeEach(() => { localStorage.clear(); mocks.health = { on: false }; mocks.link = { paired: true, installed: true }; where = null })
+
+describe('Settings → Apple Watch', () => {
+  it('shows Apple Health as the phone has it, and leads to its switch', async () => {
+    const el = await mount()
+    expect(row(el, 'Apple Health').querySelector('.lrow-v').textContent).toBe('Off')
+    expect(el.textContent).toContain('Turn on Apple Health and the watch measures your heart rate for every set.')
+    expect(row(el, 'Apple Health').querySelector('[role="switch"]')).toBeNull()
+    await act(async () => { row(el, 'Apple Health').click() })
+    expect(where.pathname).toBe('/settings/apple-health')
+    expect(where.state).toEqual({ find: 'Write to Apple Health' })
+  })
+
+  // CodeRabbit on #1109: with the Health module off, Apple Health's page is not there (Settings sends
+  // the tap back to its first screen), so the row leads to the module's switch instead.
+  it('with the Health module off, leads to the Health module in Modules', async () => {
+    const S = useStore.getState().S
+    useStore.setState({ S: { ...S, modules: { ...(S.modules || {}), health: false } } })
+    try {
+      const el = await mount()
+      await act(async () => { row(el, 'Apple Health').click() })
+      expect(where.pathname).toBe('/settings/modules')
+      expect(where.state).toEqual({ find: 'Health' })
+    } finally { useStore.setState({ S }) }
+  })
+
+  it('says when the watch was not allowed to', async () => {
+    mocks.health = { on: true }
+    writeWatchStatus({ health: 'denied' })
+    const el = await mount()
+    expect(row(el, 'Apple Health').querySelector('.lrow-v').textContent).toBe('Not allowed')
+    expect(el.textContent).toContain('Allow it in the Health app on your iPhone.')
+  })
+
+  // TestFlight "the watch is not syncing": the page shows whether the watch app ever checked in
+  // (it does each time it starts), so "installed" alone no longer reads as "in touch".
+  it('says whether the watch has checked in, and when it last did', async () => {
+    let el = await mount()
+    expect(el.textContent).toContain('The watch hasn’t checked in yet. Open openGym on it once.')
+    writeWatchStatus({ health: 'on', at: Date.now() - 5 * 60e3 })
+    el = await mount()
+    expect(el.textContent).toContain('Last heard from the watch: 5 minutes ago')
+    expect(el.textContent).not.toContain('checked in yet')
+  })
+
+  it('has the switch for opening on the watch, on to begin with', async () => {
+    const el = await mount()
+    const sw = row(el, 'Open on the watch').querySelector('[role="switch"]')
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await act(async () => { sw.click() })
+    expect(readWatchPrefs().autoShow).toBe(false)
+  })
+
+  it('lets you pick what the watch shows, one switch at a time, clean to begin with', async () => {
+    const el = await mount()
+    const sw = title => row(el, title).querySelector('[role="switch"]')
+    expect(sw('Exercise animation').getAttribute('aria-checked')).toBe('true')
+    expect(sw('Calories').getAttribute('aria-checked')).toBe('true')
+    expect(row(el, 'Time so far')).toBeUndefined()
+    await act(async () => { sw('Calories').click() })
+    await act(async () => { sw('Exercise animation').click() })
+    expect(readWatchPrefs().show).toMatchObject({ kcal: false, clip: false, hr: true, rest: 'ring' })
+    expect(row(el, 'The Digital Crown turns first')).toBeUndefined()
+  })
+
+  it('shows the rest timer as two watch screens to pick from', async () => {
+    const el = await mount()
+    const radios = () => [...el.querySelectorAll('[role="radiogroup"] [role="radio"]')]
+    expect(el.querySelector('[role="radiogroup"]').getAttribute('aria-label')).toBe('Rest timer')
+    expect(radios().map(r => r.textContent)).toEqual(['Progress bar', 'Countdown only'])
+    expect(radios().every(r => r.querySelector('img').alt)).toBe(true)
+    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['true', 'false'])
+    await act(async () => { radios()[1].click() })
+    expect(readWatchPrefs().show.rest).toBe('plain')
+    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+    await act(async () => { radios()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })) })
+    expect(readWatchPrefs().show.rest).toBe('ring')
+    expect(radios().map(r => r.tabIndex)).toEqual([0, -1])
+  })
+
+  // Every state of the link says what to do next (owner: "pairing should just work").
+  it('tells you what to do next, whatever state the watch is in', async () => {
+    const line = el => el.querySelector('[data-watch-link]')
+    mocks.link = { paired: false, installed: false }
+    let el = await mount()
+    expect(line(el).dataset.watchLink).toBe('unpaired')
+    expect(line(el).textContent).toBe('No Apple Watch is paired with this iPhone. Pair one in the Watch app, then install openGym on it there.')
+    mocks.link = { paired: true, installed: false }
+    el = await mount()
+    expect(line(el).dataset.watchLink).toBe('missing')
+    expect(line(el).textContent).toContain('find openGym under Available Apps and tap Install')
+    mocks.link = { paired: true, installed: true, reachable: false }
+    el = await mount()
+    expect(line(el).dataset.watchLink).toBe('silent')
+    expect(line(el).textContent).toContain('Open openGym on it once.')
+    writeWatchStatus({ health: 'on', at: Date.now() - 5 * 60e3 })
+    el = await mount()
+    expect(line(el).dataset.watchLink).toBe('away')
+    expect(line(el).textContent).toBe('openGym is on your Apple Watch. Last heard from the watch: 5 minutes ago. The watch app is closed or out of reach right now. Sets you log on the watch are kept there and arrive when the two are in touch again.')
+    mocks.link = { paired: true, installed: true, reachable: true }
+    el = await mount()
+    expect(line(el).dataset.watchLink).toBe('live')
+    expect(line(el).textContent).toBe('openGym is on your Apple Watch. Last heard from the watch: 5 minutes ago. Connected right now.')
+  })
+
+  it('follows the link while the page is open: the app installed on the watch shows without leaving the page', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.link = { paired: true, installed: false }
+      const el = await mount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+      expect(el.querySelector('[data-watch-link]').dataset.watchLink).toBe('missing')
+      mocks.link = { paired: true, installed: true, reachable: true }
+      await act(async () => { await vi.advanceTimersByTimeAsync(4100) })
+      expect(el.querySelector('[data-watch-link]').dataset.watchLink).toBe('live')
+      await act(async () => { document.body.replaceChildren() })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('watchLinkState: the link still starting is not "no watch"', () => {
+    expect(watchLinkState(null)).toBe('checking')
+    expect(watchLinkState({ activated: false, paired: false, installed: false })).toBe('starting')
+    expect(watchLinkState({ activated: true, paired: false })).toBe('unpaired')
+    expect(watchLinkState({ paired: true, installed: false })).toBe('missing')
+    expect(watchLinkState({ paired: true, installed: true }, null)).toBe('silent')
+    expect(watchLinkState({ paired: true, installed: true }, { at: 5 })).toBe('away')
+    expect(watchLinkState({ paired: true, installed: true, reachable: true }, null)).toBe('live')
+  })
+})

@@ -15,17 +15,21 @@
 // the poster shows and a tap plays. Longer videos show their poster and play with sound and the
 // browser's own controls on a tap.
 //
-// A link is only ever opened, after a tap, in a new browsing context without an opener or a
-// referrer. Nothing fetches it: no thumbnail, no favicon, no embed.
+// YouTube links mount a player only after a tap. Other links open without an opener or referrer.
+// No link fetches a thumbnail or favicon in advance.
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import { t, exerciseNameFor } from '../lib/i18n.js'
+import { nameIn } from '../lib/a11y-name.js'
+import { exerciseNameText } from '../lib/format.js'
 import { mediaOf, cleanUrl, linkKind } from '../lib/media-refs.js'
 import { mediaStore } from '../lib/media-store.js'
 import { fetchToStore, mayFetch } from '../lib/media-sync.js'
 import { prefetchAllowed } from '../lib/media-prefetch.js'
 import { LOOP_MAX_SEC } from '../lib/media-limits.js'
 import Icon from './Icon.jsx'
+import { youtubeId } from '../lib/youtube.js'
+import YouTubeVideo from './YouTubeVideo.jsx'
 
 /** Opens a link after a tap: sanitised again here, since plan files and backups can bring any
  *  string in, and in a new browsing context with no opener and no Referer. */
@@ -113,6 +117,8 @@ export function CustomThumb({ ex }) {
 export function LinkCard({ url, compact, mini }) {
   const u = cleanUrl(url)
   if (!u) return null
+  const yt = youtubeId(u)
+  if (yt) return <YouTubeVideo key={yt} videoId={yt} compact={compact} mini={mini} />
   const video = linkKind(u) === 'video'
   let host = ''
   try { host = new URL(u).hostname } catch { /* cleanUrl already vouched for it */ }
@@ -131,7 +137,7 @@ export function LinkCard({ url, compact, mini }) {
 
 /* ------------------------------------------------------------------ the big picture ------- */
 
-export default function CustomMedia({ ex, id, compact, minimizable }) {
+export default function CustomMedia({ ex, id, compact, minimizable, sayAs }) {
   const gifSize = useStore(s => s.S.gifSize)
   const update = useStore(s => s.update)
   // The workout's list layout, from the store: only the workout card is minimizable.
@@ -143,7 +149,8 @@ export default function CustomMedia({ ex, id, compact, minimizable }) {
   const mini = !!minimizable && gifSize === 'mini'
   const toggleSize = e => { e.stopPropagation(); update(s => { s.gifSize = mini ? 'full' : 'mini' }) }
   const toggle = minimizable
-    ? <button className="giftoggle" onClick={toggleSize}><Icon name={mini ? 'expand' : 'minimize'} />{mini ? t('Expand') : t('Minimize')}</button>
+    // named like the catalogue's (Media.jsx): "My Curl: Minimize", one per exercise in a list (P4)
+    ? <button className="giftoggle" aria-label={nameIn(sayAs || exerciseNameText(ex), mini ? t('Expand') : t('Minimize'))} onClick={toggleSize}><Icon name={mini ? 'expand' : 'minimize'} />{mini ? t('Expand') : t('Minimize')}</button>
     : null
   const cls = 'exmedia' + (compact ? ' compact' : '') + (mini ? ' mini' : '')
   const name = exerciseNameFor(ex)

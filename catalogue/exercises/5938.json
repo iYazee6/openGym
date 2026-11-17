@@ -3,10 +3,10 @@
   "name": "russian twist chop",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "abdominals",
+    "front delts",
     "hip flexors"
   ],
   "category": "calisthenics",

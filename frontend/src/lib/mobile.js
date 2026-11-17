@@ -14,6 +14,8 @@ import { isoOf, todayISO } from './format.js'
 import { effectiveRoutineIds } from './history.js'
 import { NUDGE_COPY, lineIndex, nudgeFor, nudgeMinute, toneOf } from './nudge.js'
 import { excusedOn } from './day-notes.js'
+import { stateJson } from './state-json.js'
+import { buildCheckinNotifications, checkinNames, reminderOf, CHECKIN_WINDOW_DAYS, CHECKIN_ID_BASE } from './checkin-reminder.js'
 
 export const MOBILE = import.meta.env.VITE_MOBILE === '1'
 
@@ -33,20 +35,52 @@ export async function isAndroid() {
   }
 }
 
+// 'android' or 'ios' inside the phone app, null anywhere else: for what both native shells do,
+// each its own way (the rest alert: RestAlertPlugin.java and RestAlertPlugin.swift).
+export async function nativePlatform() {
+  if (!MOBILE) return null
+  try {
+    const { Capacitor } = await import('@capacitor/core')
+    const p = Capacitor.getPlatform()
+    return p === 'android' || p === 'ios' ? p : null
+  } catch (e) {
+    return null
+  }
+}
+
 const FILE = 'opengym-state.json'
+
+// Written whole to a second file first and then moved over the first, so a write cut short (the
+// app killed mid-write, the battery gone) never leaves a half file where the last good copy was.
+// A move that did not finish leaves the new copy under FILE_NEW: whichever of the two parses and
+// is the later one (`_ts`) is the copy.
+const FILE_NEW = 'opengym-state.next.json'
 
 export async function nativeLoad() {
   try {
     const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
-    const r = await Filesystem.readFile({ path: FILE, directory: Directory.Data, encoding: Encoding.UTF8 })
-    return JSON.parse(r.data)
+    const read = async path => {
+      try { return JSON.parse((await Filesystem.readFile({ path, directory: Directory.Data, encoding: Encoding.UTF8 })).data) } catch { return null }
+    }
+    const main = await read(FILE)
+    const next = typeof Filesystem.rename === 'function' ? await read(FILE_NEW) : null
+    if (next && typeof next === 'object' && (!main || (Number(next._ts) || 0) > (Number(main._ts) || 0))) return next
+    return main
   } catch (e) { return null }   // first launch, or unreadable — localStorage copy takes over
 }
 
 export async function nativeSave(state) {
   try {
     const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
-    await Filesystem.writeFile({ path: FILE, directory: Directory.Data, data: JSON.stringify(state), encoding: Encoding.UTF8 })
+    const data = stateJson(state)
+    if (typeof Filesystem.rename === 'function') {
+      try {
+        await Filesystem.writeFile({ path: FILE_NEW, directory: Directory.Data, data, encoding: Encoding.UTF8 })
+        await Filesystem.rename({ from: FILE_NEW, to: FILE, directory: Directory.Data, toDirectory: Directory.Data })
+        return
+      } catch { /* the plain write below */ }
+    }
+    await Filesystem.writeFile({ path: FILE, directory: Directory.Data, data, encoding: Encoding.UTF8 })
   } catch (e) { /* keep the localStorage copy */ }
 }
 
@@ -72,18 +106,45 @@ export async function writeJsonFile(name, data) {
   } catch (e) { /* not a Capacitor build, or the write failed — the caller's in-memory copy stands */ }
 }
 
+// Where the pairing lives. It holds the session token, so on iOS it stays out of iCloud and
+// computer backups: Library/NoCloud (Directory.LibraryNoCloud) is excluded from them, where
+// Documents (Directory.Data on iOS) is not. Android keeps it in the app's files and excludes it
+// by name in backup_rules.xml / data_extraction_rules.xml. A restored iPhone is paired again,
+// the same as an Android phone moved through a cloud backup.
+async function remoteDir() {
+  const { Directory } = await import('@capacitor/filesystem')
+  return (await nativePlatform()) === 'ios' ? Directory.LibraryNoCloud : Directory.Data
+}
+
 export async function loadRemoteFile() {
   try {
     const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
+    const directory = await remoteDir()
+    try {
+      const r = await Filesystem.readFile({ path: REMOTE_FILE, directory, encoding: Encoding.UTF8 })
+      return JSON.parse(r.data)
+    } catch (e) {
+      if (directory === Directory.Data) throw e
+    }
+    // An iPhone paired before the move: its pairing is still in Documents. Moved once, then the
+    // backed-up copy is gone.
     const r = await Filesystem.readFile({ path: REMOTE_FILE, directory: Directory.Data, encoding: Encoding.UTF8 })
-    return JSON.parse(r.data)
+    const data = JSON.parse(r.data)
+    await Filesystem.writeFile({ path: REMOTE_FILE, directory, data: JSON.stringify(data), encoding: Encoding.UTF8, recursive: true })
+    try { await Filesystem.deleteFile({ path: REMOTE_FILE, directory: Directory.Data }) } catch { /* moved; the old copy is only stale */ }
+    return data
   } catch (e) { return null }   // never decided yet
 }
 
 export async function saveRemoteFile(data) {
   try {
-    const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
-    await Filesystem.writeFile({ path: REMOTE_FILE, directory: Directory.Data, data: JSON.stringify(data), encoding: Encoding.UTF8 })
+    const { Filesystem, Encoding } = await import('@capacitor/filesystem')
+    const directory = await remoteDir()
+    await Filesystem.writeFile({ path: REMOTE_FILE, directory, data: JSON.stringify(data), encoding: Encoding.UTF8, recursive: true })
+    // The plugin marks Library/NoCloud as excluded from backup each time it looks the folder up,
+    // which does nothing while the folder does not exist yet: the first write creates it, so
+    // one more lookup marks it now rather than on the next launch.
+    if (directory !== (await import('@capacitor/filesystem')).Directory.Data) await Filesystem.stat({ path: REMOTE_FILE, directory })
   } catch (e) { /* worst case: onboarding asks again next launch */ }
 }
 
@@ -169,25 +230,47 @@ export function buildNudgeNotifications(S, now = new Date()) {
   return notifications
 }
 
+// The channel ids of the workout and check-in reminders' sounds, null for the default channel.
+const reminderChannels = S => import('./reminder-sounds.js')
+  .then(m => Promise.all([m.reminderChannel(S, 'workout'), m.reminderChannel(S, 'checkin')]))
+  .catch(() => [null, null])
+export const onChannel = (list, channelId) => (channelId ? list.map(n => ({ ...n, channelId })) : list)
+
 // (Re)schedule the workout-day reminder: one one-off notification per future calendar date in
 // the bounded window. Cheap enough to run after any state change — the plan or the reminder time
 // may just have been edited. `interactive` gates the OS permission prompt to the Settings toggle;
 // a background resync never pops a dialog.
 export async function syncReminder(S, interactive = false) {
+  // The gym reminder (lib/gym-reminder.js) decides on the phone whether to go off, from what it
+  // was last told about today: told again here, after every save and on every return to the app.
+  if (MOBILE) import('./gym-reminder.js').then(m => m.pushGymStatus(S)).catch(() => {})
   try {
     const { LocalNotifications } = await import('@capacitor/local-notifications')
     await LocalNotifications.cancel({ notifications: [
       ...LEGACY_REMINDER_IDS,
       ...Array.from({ length: REMINDER_WINDOW_DAYS }, (_, d) => ({ id: REMINDER_ID_BASE + d })),
       ...Array.from({ length: NUDGE_WINDOW_DAYS }, (_, d) => ({ id: NUDGE_ID_BASE + d })),
+      ...Array.from({ length: CHECKIN_WINDOW_DAYS }, (_, d) => ({ id: CHECKIN_ID_BASE + d })),
     ] }).catch(() => {})
     const r = S.reminder
-    if (!r?.on) return true
+    // The check-in reminder (lib/checkin-reminder.js) is its own switch: on without the workout one.
+    const checkin = reminderOf(S).on
+    // The background check (lib/nudge-check.js) follows what is scheduled: nothing, nothing to check.
+    const check = notifications => import('./nudge-check.js').then(m => m.armNudgeCheck(S, notifications)).catch(() => {})
+    if (!r?.on && !checkin) { await check([]); return true }
     let perm = await LocalNotifications.checkPermissions()
     if (perm.display !== 'granted' && interactive) perm = await LocalNotifications.requestPermissions()
-    if (perm.display !== 'granted') return false
-    const notifications = [...buildReminderNotifications(S), ...buildNudgeNotifications(S)]
-    if (notifications.length) await LocalNotifications.schedule({ notifications })
+    if (perm.display !== 'granted') { await check([]); return false }
+    // Settings → Reminders → Sounds (lib/reminder-sounds.js): each kind on the channel of its sound.
+    const [workoutCh, checkinCh] = await reminderChannels(S)
+    const notifications = onChannel(r?.on ? [...buildReminderNotifications(S), ...buildNudgeNotifications(S)] : [], workoutCh)
+    const checkins = onChannel(checkin ? buildCheckinNotifications(S, { t, names: keys => checkinNames(S, keys, t) }) : [], checkinCh)
+    // Exact when Android allows it; the "Alarms & reminders" screen only from the Settings switch (lib/exact-alarm.js).
+    if (notifications.length || checkins.length) {
+      const { withoutAlarmPrompt } = await import('./exact-alarm.js')
+      await LocalNotifications.schedule({ notifications: await withoutAlarmPrompt(LocalNotifications, [...notifications, ...checkins], { prompt: interactive }) })
+    }
+    await check(notifications)
     return true
   } catch (e) { return false }
 }
@@ -249,16 +332,43 @@ export async function shareExportBlob(blob, filename) {
   await Share.share({ title: filename, url: uri })
 }
 
+// The same picture straight into Photos / the gallery (SaveImagePlugin on iOS and Android), so
+// nobody has to share it to themselves first. Resolves 'saved', 'denied' (no access to Photos)
+// or 'unsupported' (Android 9 and older: the caller falls back to the share sheet). The plugin
+// is called inline and never returned from an async function: a Capacitor proxy is a thenable.
+export async function saveImageToPhotos(blob, filename) {
+  const { Filesystem, Directory } = await import('@capacitor/filesystem')
+  const { registerPlugin } = await import('@capacitor/core')
+  const { toBase64 } = await import('./media-store-fs.js')
+  const data = toBase64(new Uint8Array(await blob.arrayBuffer()))
+  await Filesystem.writeFile({ path: filename, directory: Directory.Cache, data })
+  const { uri } = await Filesystem.getUri({ path: filename, directory: Directory.Cache })
+  try {
+    await registerPlugin('SaveImage').save({ path: uri })
+    return 'saved'
+  } catch (e) {
+    if (e?.code === 'denied') return 'denied'
+    if (e?.code === 'unsupported' || e?.code === 'UNIMPLEMENTED') return 'unsupported'
+    throw e
+  } finally {
+    Filesystem.deleteFile({ path: filename, directory: Directory.Cache }).catch(() => {})
+  }
+}
+
 // Hand a self-contained HTML document (lib/plan-share.js planPrintHTML) to the OS print flow.
 // Android routes it through the system PrintManager — "Save as PDF", "Save to Drive", a real
 // printer; iOS through the print sheet — "Save to Files" (as PDF), share, print. Either way the
 // platform renders the PDF, so no PDF library rides in the bundle. The local `Print` plugin is
 // registered natively (android MainActivity, ios PrintPlugin.m); on the web build this file's
 // callers gate on MOBILE and never reach here.
-export async function printHtml(html, name) {
+// `paper` ('a4' | 'letter') is the size the sheet starts on (lib/print-doc.js paperFor); Android
+// uses it, iOS takes the printer's or the region's own default. `footer` is the bottom line the
+// iOS plugin draws itself, since WebKit has no @page margin boxes: { left, page } with {0}/{1}
+// in `page` for the page number and the page count.
+export async function printHtml(html, name, { paper = 'a4', footer } = {}) {
   const { registerPlugin } = await import('@capacitor/core')
   const Print = registerPlugin('Print')
-  await Print.printHtml({ html, name })
+  await Print.printHtml({ html, name, paper, ...(footer ? { footer } : {}) })
 }
 
 // "Auto-backup on changes" (Settings): a dated snapshot dropped into Documents/openGym/ —

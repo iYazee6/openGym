@@ -3,9 +3,10 @@
   "name": "sled 45° leg press",
   "bodyPart": "upper legs",
   "equipment": "sled machine",
-  "target": "glutes",
+  "machineKind": "leg-press",
+  "target": "quads",
   "secondaryMuscles": [
-    "quadriceps",
+    "glutes",
     "hamstrings",
     "calves"
   ],

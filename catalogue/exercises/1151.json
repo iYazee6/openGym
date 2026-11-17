@@ -3,10 +3,9 @@
   "name": "suspender twist side",
   "bodyPart": "waist",
   "equipment": "suspension trainer",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "calisthenics",

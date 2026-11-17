@@ -3,9 +3,10 @@
   "name": "smith narrow row v. 2",
   "bodyPart": "back",
   "equipment": "smith machine",
-  "target": "lats",
+  "machineKind": "smith",
+  "target": "upper back",
   "secondaryMuscles": [
-    "upper back",
+    "lats",
     "biceps",
     "rhomboids",
     "forearms"

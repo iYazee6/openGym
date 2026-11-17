@@ -6,9 +6,12 @@
   "target": "triceps",
   "secondaryMuscles": [
     "chest",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A press with dumbbells held close together that shifts the work toward the triceps and inner chest.",
   "instructions": [
     "Lie on a bench with a dumbbell in each hand pressed together over your chest.",

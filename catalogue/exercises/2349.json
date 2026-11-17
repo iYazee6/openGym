@@ -3,12 +3,11 @@
   "name": "side plank butt (form check)",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "core",
     "glutes",
-    "shoulders"
+    "front delts"
   ],
   "category": "isometric",
   "description": "A side plank form check that compares a piked butt with a straight body line.",

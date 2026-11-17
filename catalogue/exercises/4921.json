@@ -3,11 +3,11 @@
   "name": "ring high row",
   "bodyPart": "back",
   "equipment": "suspension trainer",
-  "target": "upper back",
+  "target": "lats",
   "secondaryMuscles": [
-    "lats",
+    "upper back",
     "biceps",
-    "rear deltoids"
+    "rear delts"
   ],
   "category": "calisthenics",
   "description": "A row with the rings pulled toward your face, higher than a normal row. It builds the upper back and rear shoulders.",

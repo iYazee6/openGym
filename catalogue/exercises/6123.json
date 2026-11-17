@@ -3,11 +3,11 @@
   "name": "dumbbell unilateral scapula raise",
   "bodyPart": "back",
   "equipment": "dumbbell",
-  "target": "traps",
+  "target": "upper back",
   "secondaryMuscles": [
+    "traps",
     "rhomboids",
-    "upper back",
-    "shoulders"
+    "side delts"
   ],
   "category": "strength",
   "description": "A single-arm shrug-style movement that trains the muscles that lift and control the shoulder blade. It helps shoulder stability.",

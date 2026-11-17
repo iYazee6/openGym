@@ -3,11 +3,11 @@
   "name": "side plank leg lift",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "glutes",
-    "shoulders"
+    "front delts"
   ],
   "category": "isometric",
   "description": "A side plank with the top leg lifted. It trains the obliques and hip stabilisers.",

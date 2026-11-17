@@ -3,12 +3,15 @@
   "name": "cable lying cross lateral raise",
   "bodyPart": "shoulders",
   "equipment": "cable",
-  "target": "delts",
+  "target": "side delts",
   "secondaryMuscles": [
     "rotator cuff",
     "upper chest"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A lateral raise performed lying down using a crossing cable. It isolates the side delts.",
   "instructions": [
     "Lie on a bench with a cable running across your body.",

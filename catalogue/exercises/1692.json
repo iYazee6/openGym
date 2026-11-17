@@ -3,11 +3,11 @@
   "name": "sagittal plane lunge with overhead medicine ball press",
   "bodyPart": "upper legs",
   "equipment": "medicine ball",
-  "target": "quads",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
+    "quadriceps",
     "hamstrings",
-    "shoulders",
+    "front delts",
     "triceps",
     "core"
   ],

@@ -3,11 +3,10 @@
   "name": "medicine ball single leg wood chop",
   "bodyPart": "waist",
   "equipment": "medicine ball",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "glutes",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "strength",

@@ -6,10 +6,11 @@
   "target": "triceps",
   "secondaryMuscles": [
     "chest",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "Holding the top of a dip on parallel bars. It builds the triceps and shoulder stability.",
   "instructions": [
     "Grip the parallel bars and press yourself up with straight arms.",

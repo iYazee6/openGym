@@ -21,11 +21,13 @@ import { adapterFor } from './adapters/index.js';
 import * as payloadLib from './core/payload.js';
 import { runPipeline } from './core/pipeline.js';
 import { extractJSON } from './core/parse.js';
+import { userMessageFor } from './core/failure.js';
 import { hashPlan } from './core/plan-hash.js';
 import { buildPrompt } from './core/prompt.js';
+import { waitingProposal } from './core/pending.js';
 import { handleFor } from './handle.js';
 import { fetchFor } from './node-fetch.js';
-import { canDropPrivileges, unprivilegedIds } from './adapters/spawn.js';
+import { privilegeRefusal, unprivilegedIds } from './adapters/spawn.js';
 import { cohortForPayload, invalidate as invalidateCohort } from './cohort.js';
 
 // The prompt assembly, the plan fingerprint and the invoke→parse→validate→repair loop all
@@ -36,9 +38,10 @@ export { hashPlan, buildPrompt };
 const DATA = process.env.DATA_DIR || '/data';
 const COACH_DIR = path.join(DATA, 'coach');
 
-// Five minutes by default. A local model on a small CPU box can legitimately need more; a
-// cloud API that needs more has a problem. COACH_JOB_TIMEOUT_MS overrides, never below one minute.
-export const TIMEOUT_MS = Math.max(60000, +process.env.COACH_JOB_TIMEOUT_MS || 5 * 60000);
+// Ten minutes by default: a thinking model can take several, and the answer streams (#1035), so
+// the wait is a live connection. A local model on a small CPU box can need more still.
+// COACH_JOB_TIMEOUT_MS overrides, never below one minute.
+export const TIMEOUT_MS = Math.max(60000, +process.env.COACH_JOB_TIMEOUT_MS || 10 * 60000);
 const MAX_CONCURRENT = 2;          // these are minutes-scale jobs on often-single-core boxes
 const PENDING_DAYS = 14;           // FR-33
 const HISTORY_MAX = 20;
@@ -80,6 +83,13 @@ export function clearUser(uid) {
   aborts.get(uid)?.abort();
   forgetSeq.set(uid, (forgetSeq.get(uid) || 0) + 1);
   invalidateCohort();
+}
+
+/** The account is deleted: its Coach record (plans waiting for a yes, the history, the
+ *  compare-with-others switch) goes with it, today's count too, and any job of its stops. */
+export function removeUser(uid) {
+  clearUser(uid);
+  try { fs.unlinkSync(userFile(uid)); } catch { /* nothing kept */ }
 }
 
 /** Every profile with a state file — the population a cohort is drawn from. */
@@ -155,7 +165,7 @@ export function status(uid) {
 }
 function lastOutcome(rec) {
   const h = (rec.history || []).at(-1);
-  return h ? { id: h.id, kind: h.kind, outcome: h.outcome, errorClass: h.errorClass || null, at: h.at, ...(h.reading ? { reading: h.reading } : {}) } : null;
+  return h ? { id: h.id, kind: h.kind, outcome: h.outcome, errorClass: h.errorClass || null, at: h.at, ...(h.message ? { message: h.message } : {}), ...(h.trigger === 'scheduled' ? { trigger: 'scheduled' } : {}), ...(h.reading ? { reading: h.reading } : {}) } : null;
 }
 function archive(uid, rec, outcome) {
   const history = [...(rec.history || []), {
@@ -212,45 +222,57 @@ export function enqueue(uid, opts) {
     if (cred.reason === 'shared-account') throw new CoachError('shared', cred.message);
     throw new CoachError('off', 'this profile has no provider account connected');
   }
-  // Spending is what binds: a personal credential (setup token, OAuth) belongs to the first
-  // profile that runs a job on it from here on; an API key binds to nobody and is shared.
-  cfgStore.bindInstanceCredential(uid);
-
   // The privilege drop is what keeps a provider runtime out of ./data. If it cannot be
   // performed, there is no job — see canDropPrivileges for why this is not a warning either.
   // A provider that spawns nothing has no process to drop, and is not refused for it.
-  if (adapterFor(cfgStore.load().provider)?.spawns !== false) {
-    const priv = canDropPrivileges();
-    if (!priv.ok) throw new CoachError('unprivileged', `Coach jobs are disabled: ${priv.why}`);
-  }
+  // Asked before the bind below: a job refused here spends nothing, so it must not bind.
+  const refusal = privilegeRefusal(adapterFor(cfgStore.load().provider));
+  if (refusal) throw new CoachError('unprivileged', refusal);
 
+  // The caps, before the bind for the same reason: a job refused for the day spends nothing.
   const caps = cfgStore.load().caps || {};
   const { used, limit } = capState(uid);
   if (limit > 0 && used >= limit) throw new CoachError('cap', 'daily limit reached');
   if (caps.instanceDaily > 0 && instanceUsedToday() >= caps.instanceDaily) throw new CoachError('cap', 'this instance has reached its daily limit');
 
-  // Counted at enqueue, not at completion: the cap exists to bound what one profile can spend
-  // of the owner's provider account, and queueing twenty jobs spends it whether or not the
-  // twentieth ever finishes.
-  bumpDaily(uid);
-  bumpInstanceDaily();
+  // Spending is what binds: a personal credential (setup token, OAuth) belongs to the first
+  // profile that runs a job on it from here on; an API key binds to nobody and is shared.
+  cfgStore.bindInstanceCredential(uid);
 
   const job = {
     id: crypto.randomBytes(8).toString('hex'),
     uid,
     forgetSeq: forgetSeq.get(uid) || 0,
-    kind: opts.kind,                                  // 'create' | 'review' | 'debrief'
+    kind: opts.kind,                                  // 'create' | 'review' | 'debrief' | 'ask' | 'adapt'
     trigger: opts.trigger || 'manual',                // 'manual' | 'scheduled'
     workoutId: opts.workoutId ? String(opts.workoutId).slice(0, 40) : null,
     intake: opts.intake || null,
     note: clampMessage(opts.note),
     refine: clampMessage(opts.refine),
+    // A question's running session, sent by the phone (the server never holds `active`). Kept on
+    // the in-memory job only, never in the user's file; the payload builder bounds it.
+    today: (opts.kind === 'ask' || opts.kind === 'adapt') && opts.today && typeof opts.today === 'object' ? opts.today : null,
+    // The phone's health summary (sleep, heart rate, steps), only sent when the person shares
+    // health with the Coach. In memory like `today`; the payload builder bounds it (cleanVitals).
+    vitals: (opts.kind === 'ask' || opts.kind === 'review') && opts.vitals && typeof opts.vitals === 'object' ? opts.vitals : null,
+    // Library routines the app found for a question (core/routine-library.js cleanHits bounds them).
+    routines: opts.kind === 'ask' && Array.isArray(opts.routines) ? opts.routines.slice(0, 8) : null,
+    // An adapt job's exercise and reason, and the session it belongs to (so the phone can tell a
+    // proposal for this workout from one for a workout that has ended).
+    focus: opts.kind === 'adapt' && opts.focus && typeof opts.focus === 'object' ? { entry: opts.focus.entry, reason: opts.focus.reason } : null,
+    activeId: opts.kind === 'adapt' && typeof opts.activeId === 'string' ? opts.activeId.slice(0, 64) : null,
     lang: payloadLib.langTag(opts.lang),              // the language the app was showing (#303)
     state: 'queued',
     startedAt: Date.now()
   };
-  inflight.add(uid);
+  // The write comes first: if it throws, nothing is left held for a job that was never queued.
   patchUser(uid, { current: { id: job.id, kind: job.kind, state: 'queued', startedAt: job.startedAt } });
+  inflight.add(uid);
+  // Counted at enqueue, not at completion: the cap exists to bound what one profile can spend
+  // of the owner's provider account, and queueing twenty jobs spends it whether or not the
+  // twentieth ever finishes.
+  bumpDaily(uid);
+  bumpInstanceDaily();
   queue.push(job);
   pump();
   return { id: job.id };
@@ -262,6 +284,7 @@ function pump() {
     running++;
     execute(job)
       .catch(e => { console.error('coach job crashed', job.id, e); finish(job, { outcome: 'failed', errorClass: 'internal' }); })
+      .catch(e => console.error('coach finish failed', job.id, e)) // a failed bookkeeping write must not become an unhandled rejection
       .finally(() => { running--; inflight.delete(job.uid); pump(); });
   }
 }
@@ -276,10 +299,19 @@ export function whyUnusable(errors) {
 }
 
 function finish(job, result) {
+  // One short line for the person, one detailed line for whoever runs the box. The class is
+  // what the app translates; `message` is the same thing in words, for a client that does not
+  // know the class yet and for the admin card. `detail` is the provider's own (redacted by the
+  // pipeline) account of what it refused, and it never leaves the server: it names models,
+  // plans and endpoints, which is the owner's business and not a lifter's.
+  const message = result.outcome === 'failed' ? userMessageFor(result.errorClass, result.detail) : null;
+  if (result.outcome === 'failed' && result.errorClass !== 'forgotten') {
+    console.warn(`coach job ${job.id} (${job.kind}) failed [${result.errorClass || 'internal'}]${result.detail ? ': ' + result.detail : ''}`);
+  }
   cfgStore.logJob({
     at: new Date().toISOString(), uid: job.uid, kind: job.kind, trigger: job.trigger,
     outcome: result.outcome, errorClass: result.errorClass || null,
-    ms: Date.now() - job.startedAt, detail: result.detail || null
+    ms: Date.now() - job.startedAt, detail: result.detail || null, message
   });
   // Forgotten while it ran: the record is gone and stays gone, and nobody is notified. The
   // job still ran and still spent, which is why the instance log above keeps its line.
@@ -288,11 +320,14 @@ function finish(job, result) {
   const history = [...(rec.history || []), {
     id: job.id, kind: job.kind, trigger: job.trigger, outcome: result.outcome,
     errorClass: result.errorClass || null, at: Date.now(),
+    // The short line lives beside the class, so the chat can say something specific even when
+    // the client has no translated line for a class it has not seen before.
+    ...(message ? { message } : {}),
     // "Nothing to change" is an answer with a reason attached, and throwing the reason away
     // leaves the user with a job that finished and nothing to show for it. It lives here, in
     // the profile's own file — deliberately not in `detail`, which goes to the instance log
     // the admin card renders, and which carries counts and outcomes only (FR-12/42).
-    ...(result.reading ? { reading: String(result.reading).slice(0, 1200) } : {})
+    ...(result.reading ? { reading: String(result.reading).slice(0, 4000) } : {})
   }].slice(-HISTORY_MAX);
   writeUser(job.uid, {
     ...rec,
@@ -325,12 +360,20 @@ async function execute(job) {
   const cfg = cfgStore.load();
   const adapter = adapterFor(cfg.provider);
   if (!adapter) return finish(job, { outcome: 'failed', errorClass: 'off' });
+  // The gate again, for the provider this job actually runs on: enqueue asked about the one
+  // configured then, and a job that waited behind two others would otherwise spawn without the
+  // drop if the admin had switched from an HTTPS provider to a runtime-backed one meanwhile.
+  const refusal = privilegeRefusal(adapter);
+  if (refusal) return finish(job, { outcome: 'failed', errorClass: 'unprivileged', detail: refusal });
 
   if (job.kind === 'debrief' && !payloadLib.findWorkout(S, job.workoutId)) {
     return finish(job, { outcome: 'failed', errorClass: 'noworkout' });
   }
 
   const pendingCreate = job.refine ? readUser(job.uid).pending : null;
+  // Web research: a chat question, with the owner allowing it, a provider that has a search tool,
+  // and the person having switched it on for themselves.
+  const useWeb = job.kind === 'ask' && !!cfg.web && !!cfgStore.providerMeta(cfg).web && S.coach?.web === true;
   const payload = payloadLib.build(S, {
     handle: handleFor(job.uid),
     kind: job.kind,
@@ -339,6 +382,11 @@ async function execute(job) {
     refine: job.refine,
     previous: pendingCreate?.bundle || null,
     workoutId: job.workoutId,
+    today: job.today,
+    focus: job.focus,
+    vitals: job.vitals,
+    routines: job.routines,
+    web: useWeb,
     // The app says which language it is in. A scheduled review has no app behind it: a profile
     // that never picked a language then gets the instance's DEFAULT_LANG, like its screens do.
     lang: job.lang || (S.langAuto === true ? payloadLib.langTag(process.env.DEFAULT_LANG) : null),
@@ -367,7 +415,7 @@ async function execute(job) {
       adapter, cfg, kind: job.kind, payload, model: cfgStore.modelFor(cfg), timeoutMs: TIMEOUT_MS,
       // The HTTP adapters take the fetch and the abort signal they are given; the runtime
       // adapters ignore both.
-      invokeOpts: { jobDir, env, fetch: fetchFor(TIMEOUT_MS), signal: ctl.signal, maxTokens: cfg.maxOutputTokens }
+      invokeOpts: { jobDir, env, fetch: fetchFor(TIMEOUT_MS), signal: ctl.signal, maxTokens: cfg.maxOutputTokens, ...(useWeb ? { web: true } : {}) }
     });
     if (!attempt.ok) {
       // Cancelled by a forget, not failed by the provider: the log must not blame the job budget.
@@ -377,15 +425,23 @@ async function execute(job) {
     if (attempt.nochange) {
       return finish(job, { outcome: 'nochange', pending: null, detail: null, reading: attempt.reading });
     }
+    // A question whose answer is a plan or a change-set (core/ask-actions.js) waits as that kind.
+    const kind = attempt.kind || job.kind;
     const pending = {
       id: job.id,
-      kind: job.kind,
+      kind,
       createdAt: Date.now(),
       expiresAt: Date.now() + PENDING_DAYS * 86400000,
       planHash: hashPlan(payloadLib.canonicalPlan(S)),
       iteration: job.refine ? (pendingCreate?.iteration || 1) + 1 : 1,
+      // Nobody asked for a scheduled one, so nobody is watching for it: a phone app has no web
+      // push, and says so itself when it next comes to the foreground (lib/coach-schedule.js).
+      ...(job.trigger === 'scheduled' ? { trigger: 'scheduled' } : {}),
       // A debrief names the session it read, so the card can show it after the fact.
       ...(job.kind === 'debrief' ? { workout: payloadLib.workoutMeta(S, job.workoutId) } : {}),
+      ...(kind === 'ask' || kind === 'adapt' ? { prev: waitingProposal(readUser(job.uid).pending) } : {}),
+      ...(kind !== job.kind ? { from: job.kind } : {}),
+      ...(job.kind === 'adapt' ? { activeId: job.activeId, focus: payload.focus } : {}),
       ...attempt.result
     };
     return finish(job, { outcome: 'ready', pending });
@@ -406,9 +462,12 @@ export function resolvePending(uid, { accepted = [], rejected = [], dismissed = 
     outcome: dismissed ? 'dismissed' : 'applied',
     accepted: accepted.length, rejected: rejected.length, at: Date.now()
   }].slice(-HISTORY_MAX);
-  writeUser(uid, { ...rec, pending: null, history });
+  // A read answer gives back the proposal it was asked beside (core/pending.js).
+  const back = rec.pending.kind === 'ask' || rec.pending.kind === 'adapt' ? waitingProposal(rec.pending.prev) : null;
+  writeUser(uid, { ...rec, pending: back, history });
   return { ok: true };
 }
+
 
 /* ---------- admin test + boot recovery ---------- */
 
@@ -459,6 +518,10 @@ export async function testRun() {
   const cfg = cfgStore.load();
   const adapter = adapterFor(cfg.provider);
   if (!adapter) return { ok: false, error: 'no provider configured' };
+  // The same gate as enqueue: this spawns the runtime a job would, and without the drop the
+  // child runs as this process and can read ./data.
+  const refusal = privilegeRefusal(adapter);
+  if (refusal) return { ok: false, error: refusal };
   const jobDir = adapter.spawns === false ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'coach-test-'));
   try {
     // No user asked for this, so there is no profile whose account is being spent. In instance

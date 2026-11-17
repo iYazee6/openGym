@@ -3,11 +3,11 @@
   "name": "inverted shrug",
   "bodyPart": "back",
   "equipment": "body weight",
-  "target": "traps",
+  "target": "upper back",
   "secondaryMuscles": [
-    "upper back",
+    "traps",
     "rhomboids",
-    "shoulders",
+    "rear delts",
     "grip muscles"
   ],
   "category": "calisthenics",

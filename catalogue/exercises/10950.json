@@ -5,12 +5,13 @@
   "equipment": "suspension trainer",
   "target": "pectorals",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "triceps",
     "core",
     "upper back"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A push-up hold on rings with arms fully extended. It demands shoulder stability and core tension.",
   "instructions": [
     "Set the rings low and take a plank with your hands on them.",

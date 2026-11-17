@@ -3,12 +3,12 @@
   "name": "barbell complex stiff leg deadlift clean step",
   "bodyPart": "full body",
   "equipment": "barbell",
-  "target": "glutes",
+  "target": "hamstrings",
   "secondaryMuscles": [
-    "hamstrings",
+    "glutes",
     "lower back",
     "upper back",
-    "shoulders",
+    "rear delts",
     "quadriceps"
   ],
   "category": "olympic",

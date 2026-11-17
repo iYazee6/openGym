@@ -5,25 +5,25 @@
 #           platform runtime entirely, so an owner who never wanted the Coach carries none of it.
 #   coach                                     — the same image plus the Claude Agent SDK.
 #
-# Build the opt-in one with:  docker build --target coach ./api
+# Build the opt-in one with:  docker build --pull --target coach ./api
 # or through compose with:    API_TARGET=coach docker compose up --build
 #
 # The stage order matters: Docker builds the *last* stage when none is named, so `default` is
 # deliberately last and `coach` sits above it.
 
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 
 # Declared on the base stage so both targets inherit the labels and the healthcheck.
 ARG VERSION=dev
 ARG VCS_REF=dev
 ARG BUILD_DATE=unknown
 
-LABEL maintainer="Duarte Santos https://gitlab.com/DuarteSantos8" \
+LABEL maintainer="Duarte Santos https://github.com/DuarteSantos8" \
     org.opencontainers.image.title="opengym-api" \
     org.opencontainers.image.description="Backend for Self-hosted gym & body-weight tracker — plan routines, log workouts (supersets & cardio too), track your weight and progress, passkey login. Your data, your server." \
-    org.opencontainers.image.source="https://gitlab.com/DuarteSantos8/opengym" \
-    org.opencontainers.image.url="https://gitlab.com/DuarteSantos8/opengym/container_registry" \
-    org.opencontainers.image.documentation="https://gitlab.com/DuarteSantos8/opengym#readme" \
+    org.opencontainers.image.source="https://github.com/DuarteSantos8/openGym" \
+    org.opencontainers.image.url="https://opengym.ch" \
+    org.opencontainers.image.documentation="https://github.com/DuarteSantos8/openGym#readme" \
     org.opencontainers.image.licenses="AGPL-3.0-or-later" \
     org.opencontainers.image.version=$VERSION \
     org.opencontainers.image.revision=$VCS_REF \
@@ -53,15 +53,24 @@ RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
 # Every module server.js imports from the api root has to be named here: the image carries nothing
 # else, and one that is missing only shows at boot, as ERR_MODULE_NOT_FOUND.
-COPY server.js push-messages.js nudge.js nudge-copy.js verify-error.js password.js rate-limit.js passkeys-store.js device-link.js media.js queue.js sync-stamps.js durable.js ./
+COPY server.js push-messages.js nudge.js nudge-copy.js wrapped.js wrapped-copy.js checkin-reminder.js checkin-copy.js verify-error.js password.js rate-limit.js passkeys-store.js device-link.js watch-relay.js media.js queue.js sync-stamps.js durable.js admin-socket.js recover.js net-guard.js permissions.js consent.js share-log.js tokens.js oauth.js budgets.js role-claims.js origin.js ./
 COPY coach ./coach
+COPY library ./library
+COPY oidc ./oidc
+COPY integrations ./integrations
+COPY trainers ./trainers
+COPY sources ./sources
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 CMD ["node", "server.js"]
 
-HEALTHCHECK --interval=5m \
+# Every 30 s, so a fresh container reads "healthy" half a minute after it starts instead of after
+# five (TrueNAS and Portainer wait for it before they call the app running, #844).
+# wget is BusyBox's, already in the Alpine image, so nothing is added for it.
+HEALTHCHECK --interval=30s \
             --timeout=5s \
+            --start-period=20s \
             --retries=3 \
             CMD wget --spider -q "http://127.0.0.1:${PORT}/api/health" || exit 1
 
@@ -87,7 +96,7 @@ RUN mkdir -p /coach-auth && chown coach:coach /coach-auth && chmod 700 /coach-au
 VOLUME ["/coach-auth"]
 
 # ---------------------------------------------------------------------------------------------
-# Last, so that a plain `docker build ./api` keeps producing the runtime-free image.
+# Last, so that a plain `docker build --pull ./api` keeps producing the runtime-free image.
 FROM base AS default
 # npm itself is only a build-time tool here: the server is started with `node server.js` and
 # nothing in it spawns npm. Its bundled dependency tree (tar, brace-expansion, ...) is where

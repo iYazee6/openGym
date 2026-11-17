@@ -3,11 +3,11 @@
   "name": "dumbbell single arm chest supported row",
   "bodyPart": "back",
   "equipment": "dumbbell",
-  "target": "lats",
+  "target": "upper back",
   "secondaryMuscles": [
-    "upper back",
+    "lats",
     "rhomboids",
-    "rear deltoids",
+    "rear delts",
     "biceps"
   ],
   "category": "strength",

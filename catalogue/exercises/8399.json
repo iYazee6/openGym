@@ -3,10 +3,10 @@
   "name": "side floor tap plank",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "abdominals",
+    "front delts",
     "glutes"
   ],
   "category": "calisthenics",

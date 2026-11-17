@@ -3,9 +3,10 @@
   "name": "smith lateral step up",
   "bodyPart": "upper legs",
   "equipment": "smith machine",
-  "target": "quads",
+  "machineKind": "smith",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
+    "quadriceps",
     "hamstrings",
     "adductors"
   ],

@@ -5,11 +5,12 @@
   "equipment": "body weight",
   "target": "abs",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "glutes",
     "obliques"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A standing plank against a wall, an easy way to learn core bracing.",
   "instructions": [
     "Stand facing a wall and place your forearms or hands on it.",

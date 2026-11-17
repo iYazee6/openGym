@@ -5,11 +5,12 @@
   "equipment": "body weight",
   "target": "abs",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "obliques",
     "glutes"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A front plank held with one arm lifted. It tests anti-rotation core strength.",
   "instructions": [
     "Start in a high plank with feet wide.",

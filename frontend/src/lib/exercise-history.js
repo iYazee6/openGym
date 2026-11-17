@@ -1,5 +1,5 @@
-import { metricEntriesForExercise, metricRowsForEntry, bestWeightForEntry, completedRepsOf, modeOf, workoutAt } from './history.js'
-import { completedVolumeOf } from './workout-model.js'
+import { metricEntriesForExercise, metricRowsForEntry, bestWeightForEntry, completedRepsOf, modeOf, workoutAt, countsWarmups } from './history.js'
+import { completedVolumeOf, isWarmupRow } from './workout-model.js'
 import { bestSetOf } from './onerm.js'
 import { beatsWeight } from './exercises.js'
 import { currentDbLoad, historyAs, volumeFactor, workoutAs } from './dumbbells.js'
@@ -18,7 +18,8 @@ import { currentDbLoad, historyAs, volumeFactor, workoutAs } from './dumbbells.j
 // mode still appears in the list (its sets are labelled by their own target) but gets no point
 // and no value, so the curve never mixes seconds with kilos.
 //
-// Warm-up rows are excluded from every number here, as everywhere else.
+// Warm-up rows are excluded from every number here, as everywhere else, except a session's
+// volume when the profile counts warm-ups in it (#719).
 
 export const HISTORY_SESSIONS = 10
 
@@ -43,7 +44,10 @@ export function exerciseHistory(S, exId, { limit = HISTORY_SESSIONS } = {}) {
     const sameMode = entries.filter(item => item.mode === mode)
     const rows = sameMode.flatMap(item => item.rows)
     const en = { ...sameMode.at(-1).entry, sets: rows }
-    if (rows.length) logged.push({ w, en, mode, rows })
+    // Its done warm-ups, only ever added to the session's volume and only when the profile
+    // counts them (#719): the sets, the best and the curve stay work sets.
+    const warm = countsWarmups(S) ? sameMode.flatMap(item => (item.entry.sets || []).filter(isWarmupRow)) : []
+    if (rows.length) logged.push({ w, en, mode, rows, warm })
   })
   logged.sort((a, b) => workoutAt(a.w) - workoutAt(b.w))
 
@@ -52,29 +56,30 @@ export function exerciseHistory(S, exId, { limit = HISTORY_SESSIONS } = {}) {
 
   const mode = logged[logged.length - 1].mode
   const repsOnly = mode === 'reps' && !logged.some(l => l.mode === 'reps' && bestWeightForEntry(l.en) > 0)
-  const metric = mode === 'cardio' ? 'min' : mode === 'time' ? 'sec' : repsOnly ? 'reps' : 'weight'
+  const metric = mode === 'cardio' ? 'min' : mode === 'time' ? 'sec' : mode === 'distance' ? 'm' : repsOnly ? 'reps' : 'weight'
   const valueOf = ({ en, rows }) => {
     if (metric === 'min') return rows.reduce((a, s) => a + (Number(s.min) || 0), 0)
     if (metric === 'sec') return Math.max(0, ...rows.map(s => Number(s.sec) || 0))
+    if (metric === 'm') return Math.max(0, ...rows.map(s => Number(s.m) || 0))
     if (metric === 'reps') return Math.max(0, ...rows.map(completedRepsOf))
     return bestWeightForEntry(en)
   }
 
   let best = 0, prId = null
   const sessions = [], points = [], e1rmPoints = []
-  logged.forEach(({ w, en, mode: m, rows }) => {
+  logged.forEach(({ w, en, mode: m, rows, warm }) => {
     const same = m === mode
     const value = same ? valueOf({ en, rows }) : null
     const e1rm = m === 'reps' ? (bestSetOf(en)?.est ?? null) : null
     const t = workoutAt(w)
     // "PR" goes on the session that first reached the all-time best, not on every session
     // that later matched it — one marker says where the record was set.
-    if (value != null && value > best) { best = value; prId = w.id }
+    if (value != null && (metric === 'weight' ? beatsWeight(exId, value, best) : value > best)) { best = value; prId = w.id }
     if (value != null && value > 0) points.push({ t, d: w.d, y: value, e1rm })
     if (e1rm != null) e1rmPoints.push({ t, d: w.d, y: e1rm })
     sessions.push({
       id: w.id, d: w.d, t, mode: m, target: en.target || null, sets: rows, value, e1rm,
-      volume: m === 'reps' ? entryVolume(rows, en) : null,
+      volume: m === 'reps' ? entryVolume(warm.length ? [...warm, ...rows] : rows, en) : null,
     })
   })
   // The "first reached" rule only holds for records above zero: a bodyweight session with
@@ -106,6 +111,7 @@ export function exerciseHistory(S, exId, { limit = HISTORY_SESSIONS } = {}) {
 export function bestSetFor(S, exId, mode = modeOf({ id: exId }), as) {
   const keys = s => mode === 'cardio' ? [Number(s.min) || 0, Number(s.speed) || 0]
     : mode === 'time' ? [Number(s.sec) || 0, Number(s.w) || 0]
+      : mode === 'distance' ? [Number(s.w) || 0, Number(s.m) || 0]
       : [Number(s.w) || 0, Number(s.r) || 0]
   const better = (a, b) => {
     const [a1, a2] = keys(a), [b1, b2] = keys(b)

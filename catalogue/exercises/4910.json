@@ -7,9 +7,10 @@
   "secondaryMuscles": [
     "brachialis",
     "forearms",
-    "shoulders"
+    "front delts"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A static hold with the elbows bent and the dumbbells held in place. It builds endurance in the arms.",
   "instructions": [
     "Stand tall with a dumbbell in each hand.",

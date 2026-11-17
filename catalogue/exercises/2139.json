@@ -3,10 +3,11 @@
   "name": "hands bike",
   "bodyPart": "chest",
   "equipment": "upper body ergometer",
-  "target": "pectorals",
+  "target": "cardiovascular system",
   "secondaryMuscles": [
+    "chest",
     "triceps",
-    "shoulders"
+    "front delts"
   ],
   "category": "cardio",
   "description": "Cranking pedals with your hands on an upper body ergometer. Gets your heart rate up using the arms and shoulders.",

@@ -55,7 +55,7 @@ test('back-off: a profile with no workouts at all is not nagged for ever', () =>
 });
 
 test('coach week / rotation: the day right after a workout is rest, the second day off is a miss', () => {
-  const queue = { ids: ['push', 'pull'], since: 0, startsOn: '2026-09-07' };
+  const queue = { ids: ['push', 'pull'], since: 1, startsOn: '2026-09-07' };
   const s = S({ week: {}, queue, workouts: [{ id: 'a', d: '2026-09-07', routineId: 'push', start: 1 }] });
   assert.equal(nudgeFor(s, '2026-09-08'), null, 'the day after a session');
   assert.equal(nudgeFor(s, '2026-09-09'), 'pull', 'two days off in a row');
@@ -109,4 +109,24 @@ test('push text: by tone, one line per date, routine name filled in, localized',
   }
   // a name with $-patterns is inserted literally
   assert.match(nudgePush('en', 'friendly', { name: '$& $1' }, '2026-09-04').body + nudgePush('en', 'friendly', { name: '$& $1' }, '2026-09-05').body, /\$& \$1/);
+});
+
+// The nudge looks back over up to fifteen days, and every day asks the queue rules again. They
+// used to work the whole queue out on each question (a dedupe over every id, a Set of every
+// routine), so a crafted state the size a PUT allows held the server's one thread for seconds per
+// nudge, in the tick and on every GET /api/nudge-check. Now it is worked out once per state.
+// These are under the 5 MB limit; each took several seconds before.
+test('nudge: a crafted state costs one pass, not one per day looked back on', () => {
+  const today = '2026-10-23';
+  const within = state => {
+    const t = Date.now();
+    nudgeFor(state, today);
+    return Date.now() - t;
+  };
+  const long = [...Array.from({ length: 400000 }, (_, i) => 'x' + i), 'push'];
+  // a long queue of ids that name no routine, its one real session due from today and never done,
+  // so every earlier day is looked back on and asks the queue again
+  assert.ok(within(S({ week: {}, queue: { ids: long, since: 1, startsOn: today } })) < 1000);
+  // the same, with that session pinned to a later day, so every day falls to the weekday list
+  assert.ok(within(S({ queue: { ids: long, since: 1, startsOn: '2026-10-01' }, dayPlan: { '2026-11-01': 'push' }, week: { 0: 'pull', 1: 'pull', 2: 'pull', 3: 'pull', 4: 'pull', 5: 'pull', 6: 'pull' } })) < 1000);
 });

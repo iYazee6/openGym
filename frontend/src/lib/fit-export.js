@@ -181,6 +181,7 @@ const BY_TARGET = {
   biceps: C.curl, forearms: C.curl, triceps: C.tricepsExtension, pectorals: C.benchPress, delts: C.shoulderPress,
   lats: C.pullUp, 'upper back': C.row, traps: C.shrug, abs: C.crunch, quads: C.squat, glutes: C.hipRaise,
   hamstrings: C.legCurl, calves: C.calfRaise, spine: C.hyperextension, adductors: C.hipStability, abductors: C.hipStability,
+  obliques: C.crunch, 'hip flexors': C.legRaise, shins: C.calfRaise,
 }
 
 const RUNNING = /treadmill|\brun|jog|sprint/
@@ -236,7 +237,8 @@ function itemsOf(w, exOf) {
         ex, mode, category, len, chained, at: Number.isFinite(at) ? at : null,
         reps: mode === 'reps' && reps > 0 ? reps : null,
         w: mode === 'cardio' ? null : Number(row.w) || 0,
-        km: mode === 'cardio' ? (Number(row.speed) || 0) * min / 60 : 0,
+        // a set logged by its distance (#887) keeps it as typed
+        km: mode === 'cardio' ? (Number(row.km) > 0 ? Number(row.km) : (Number(row.speed) || 0) * min / 60) : 0,
       })
     }
     for (const s of entry.sets || []) {

@@ -3,11 +3,10 @@
   "name": "cable kneeling twist",
   "bodyPart": "waist",
   "equipment": "cable",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "core",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
   "description": "A kneeling trunk rotation on a cable. It trains the obliques while the base stays stable.",

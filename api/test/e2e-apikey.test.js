@@ -44,7 +44,17 @@ const server = http.createServer((req, res) => {
     if (failFirst > 0) { failFirst--; return send(529, { error: { type: 'overloaded_error', message: 'Overloaded' } }); }
     const text = JSON.stringify(answerWith);
     if (req.url === '/v1/messages') return send(200, { content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } });
-    if (req.url === '/v1/chat/completions') return send(200, { choices: [{ message: { content: text }, finish_reason: 'stop' }] });
+    // Chat Completions and Gemini answer a stream for real, in chunks, the way they do (#1035).
+    const stream = events => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      events.forEach((e, i) => setTimeout(() => { res.write(`data: ${typeof e === 'string' ? e : JSON.stringify(e)}\n\n`); if (i === events.length - 1) res.end(); }, i * 5));
+    };
+    const half = Math.floor(text.length / 2);
+    if (req.url === '/v1/chat/completions') {
+      if (rec.body && rec.body.stream) return stream([{ choices: [{ delta: { content: text.slice(0, half) } }] }, { choices: [{ delta: { content: text.slice(half) }, finish_reason: 'stop' }] }, '[DONE]']);
+      return send(200, { choices: [{ message: { content: text }, finish_reason: 'stop' }] });
+    }
+    if (/^\/v1beta\/models\/.+:streamGenerateContent\?alt=sse$/.test(req.url)) return stream([{ candidates: [{ content: { parts: [{ text: text.slice(0, half) }] } }] }, { candidates: [{ content: { parts: [{ text: text.slice(half) }] }, finishReason: 'STOP' }] }]);
     if (/^\/v1beta\/models\/.+:generateContent$/.test(req.url)) return send(200, { candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] });
     send(404, { error: { message: 'unknown route ' + req.url } });
   });
@@ -130,10 +140,10 @@ test('OpenAI: bearer auth, json_schema response format, max_completion_tokens; "
   assert.match(rec.history.at(-1).reading, /not trained/);
 });
 
-test('Gemini: x-goog-api-key header, generateContent, JSON mime type', async () => {
+test('Gemini: x-goog-api-key header, streamGenerateContent, JSON mime type', async () => {
   answerWith = REVIEW_NOCHANGE;
   await runReview('gemini', 'AIza-test-789', 'u-gemini');
-  const job = seen.find(s => /:generateContent$/.test(s.url));
+  const job = seen.find(s => /:streamGenerateContent\?alt=sse$/.test(s.url));
   assert.ok(job);
   assert.equal(job.headers['x-goog-api-key'], 'AIza-test-789');
   assert.ok(!job.url.includes('key='), 'never ?key=');
@@ -147,6 +157,34 @@ test('an overloaded provider is retried and the job still succeeds', async () =>
   const rec = await runReview('anthropic', 'sk-ant-retry', 'u-retry');
   assert.equal(seen.filter(s => s.url === '/v1/messages').length, 2, 'one 529, one 200');
   assert.equal(rec.history.at(-1).outcome, 'nochange');
+});
+
+test('a question asked in the chat comes back as an answer, not a plan (#660)', async () => {
+  answerWith = REVIEW_CHANGE;
+  await runReview('openai', 'sk-oa-ask', 'u-ask');
+  assert.equal(jobs.readUser('u-ask').pending.kind, 'review');
+  answerWith = { coach_contract: 1, answer: 'Four sets of dips: three working sets and one warm-up.' };
+  seen.length = 0;
+  jobs.enqueue('u-ask', { kind: 'ask', note: 'how many sets of dips is that?' });
+  await settle('u-ask');
+  const job = seen.find(s => s.url === '/v1/chat/completions');
+  assert.match(job.body.messages[0].content, /# Task: answer a question/);
+  assert.match(JSON.stringify(job.body.messages), /how many sets of dips is that\?/);
+  let rec = jobs.readUser('u-ask');
+  assert.equal(rec.history.at(-1).outcome, 'ready');
+  assert.equal(rec.pending.kind, 'ask');
+  assert.equal(rec.pending.answer, 'Four sets of dips: three working sets and one warm-up.');
+  assert.equal(rec.pending.changes, undefined, 'an answer carries no change-set');
+  // The review that was waiting for a decision is still there once the answer has been read:
+  // a question about a suggestion must not throw the suggestion away.
+  jobs.resolvePending('u-ask', { accepted: ['ask'] });
+  rec = jobs.readUser('u-ask');
+  assert.equal(rec.pending?.kind, 'review');
+  assert.equal(rec.pending.changes.length, 1);
+  assert.equal(rec.history.at(-1).kind, 'ask');
+  // Deciding on the review then clears it as before.
+  jobs.resolvePending('u-ask', { accepted: ['c1'] });
+  assert.equal(jobs.readUser('u-ask').pending, null);
 });
 
 test('a wrong key is reported as an auth failure, with the provider\'s reason kept for the admin card', async () => {

@@ -66,7 +66,9 @@ describe('Library favourites', () => {
   it('keeps the header button reachable without shredding the title', () => {
     expect(cssSource).toContain('.hdr>div{min-width:0}')
     expect(cssSource).toContain('.hdr>.btn{flex:none}')
-    expect(cssSource).toMatch(/@media \(max-width:420px\)\{\.hdr h1\{font-size:30px\}\}/)
+    // the page title is --fs-large, which drops from 34 to 30 px on phone widths (P1 type scale)
+    expect(cssSource).toMatch(/\.hdr h1\{font-size:var\(--fs-large\)/)
+    expect(cssSource).toMatch(/@media \(max-width:420px\)\{:root\{--fs-large:1\.875rem\}\}/)
     const h1 = cssSource.match(/^\.hdr h1\{([^}]*)\}/m)
     expect(h1?.[1]).toContain('overflow-wrap:break-word')
     expect(h1[1]).not.toContain('overflow-wrap:anywhere')
@@ -183,5 +185,39 @@ describe('Library similar exercises', () => {
     expect(label(host)).toBe('Similar exercises')
     const all = names(host)
     expect(new Set(all).size).toBe(all.length)
+  })
+})
+
+describe('Library gym filter while searching', () => {
+  const search = (host, text) => {
+    const input = host.querySelector('.search input')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    act(() => { setter.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+  const line = host => [...host.querySelectorAll('span')].find(el => el.textContent.startsWith('Not in "Home"'))
+  const homeOnlyDumbbells = () => {
+    mocks.S.equipProfiles = [{ id: 'home', name: 'Home', equipment: ['dumbbell'], accV: 1 }]
+    mocks.S.activeEquipId = 'home'
+    mocks.S.equipFilterOn = true
+  }
+
+  it('says how many matches the gym hid, and shows them all on a tap', () => {
+    homeOnlyDumbbells()
+    const host = render()
+    search(host, 'bench press')
+    const kept = names(host).length
+    expect(line(host).textContent).toMatch(/^Not in "Home": \d+ more$/)
+    expect(Number(line(host).textContent.match(/(\d+) more/)[1])).toBeGreaterThan(0)
+    act(() => line(host).nextSibling.click())
+    expect(line(host)).toBeUndefined()
+    expect(names(host).length).toBeGreaterThan(kept)
+  })
+  it('says nothing while browsing, or when the gym hid none of the matches', () => {
+    homeOnlyDumbbells()
+    const host = render()
+    expect(line(host)).toBeUndefined()
+    search(host, 'dumbbell curl')
+    expect(names(host).length).toBeGreaterThan(0)
+    expect(line(host)).toBeUndefined()
   })
 })

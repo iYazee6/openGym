@@ -3,11 +3,11 @@
   "name": "dumbbell low windmill",
   "bodyPart": "waist",
   "equipment": "dumbbell",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "hamstrings",
-    "shoulders",
+    "front delts",
     "lower back"
   ],
   "category": "strength",

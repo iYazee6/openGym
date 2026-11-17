@@ -3,10 +3,9 @@
   "name": "band overhead side bend",
   "bodyPart": "waist",
   "equipment": "band",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "strength",

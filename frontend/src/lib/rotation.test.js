@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { scheduleModeOf, queueRecovery, rotationIds, startPass, saveRotation, startNewPass, stopPass, refillAfter, refillIfComplete, chooseRotation, chooseFixedWeek } from './rotation.js'
+import { scheduleModeOf, queueRecovery, rotationIds, startPass, saveRotation, startNewPass, stopPass, refillAfter, refillIfComplete, chooseRotation, chooseFixedWeek, segmentAt, sequenceOf, isSimpleSequence, REST } from './rotation.js'
 import { queueNext, queueRemaining, queueView } from './queue.js'
 import { effectiveRoutineIds } from './history.js'
 
@@ -30,6 +30,8 @@ describe('the selected mode is derived from the live queue', () => {
     expect(queueRecovery(st)).toBe(true)
     expect(queueRecovery(S())).toBe(false)
     expect(queueRecovery(S({ queue: pass(['a']) }))).toBe(false)
+    // a week with no date at all (neither startsOn nor since) is one to fix, not a finished one
+    expect(queueRecovery(S({ queue: { ids: ['a', 'b'], label: 'W1' } }))).toBe(true)
   })
 })
 
@@ -64,7 +66,7 @@ describe('editing the sequence', () => {
     saveRotation(s, ['c', 'b', 'a', 'own'], 'My split', TODAY, NOW)
     expect(s.queue.since).toBe(NOW - 86400000)
     expect(s.queue.startsOn).toBe('2026-09-10')
-    expect(queueRemaining(s)).toEqual(['c', 'b', 'own'])   // 'a' is still done
+    expect(queueRemaining(s, TODAY)).toEqual(['c', 'b', 'own'])   // 'a' is still done
     expect(s.rotation.id).toBe('r1')
   })
 
@@ -88,7 +90,7 @@ describe('editing the sequence', () => {
     // the old one was logged yesterday, not today (the one-day boundary only pushes to tomorrow
     // when today's own workout is what completed the pass).
     expect(s.queue.startsOn).toBe(TODAY)
-    expect(queueRemaining(s)).toEqual(['a'])
+    expect(queueRemaining(s, TODAY)).toEqual(['a'])
   })
 
   it('building the loop one routine at a time keeps a session trained today as done', () => {
@@ -113,7 +115,7 @@ describe('editing the sequence', () => {
     expect(s.queue.strict).toBeUndefined()
     expect(s.queue.startsOn).toBe('2026-09-13')
     expect(queueView(s, TODAY).waiting).toBe(true)
-    expect(queueRemaining(s)).toEqual(['a'])
+    expect(queueRemaining(s, TODAY)).toEqual(['a'])
   })
 
   it('removing a session clears its future pin, but leaves past pins and pins on kept sessions alone', () => {
@@ -167,7 +169,7 @@ describe('editing the sequence', () => {
     startNewPass(s, TODAY, NOW)
     saveRotation(s, ['b', 'a'], 'My split', TODAY, NOW + 5000)
     expect(s.queue).toMatchObject({ strict: true, since: NOW, startsOn: TODAY })
-    expect(queueRemaining(s)).toEqual(['b', 'a'])
+    expect(queueRemaining(s, TODAY)).toEqual(['b', 'a'])
   })
 
   it('Start new pass sweeps the old pass\'s future pins — a stale one would otherwise resurface as open on the new pass', () => {
@@ -309,8 +311,46 @@ describe('refilling a completed managed pass', () => {
     const skewed = w('a', '2026-09-11', NOW + 5 * 60000)   // "logged" five minutes ahead of now
     const s = managed(['a', 'b', 'c'], [skewed, w('b', '2026-09-11'), last])
     expect(refillAfter(s, last, TODAY, NOW)).toBe(true)
-    expect(queueRemaining(s)).toEqual(['a', 'b', 'c'])
+    expect(queueRemaining(s, TODAY)).toEqual(['a', 'b', 'c'])
     expect(queueView(s, TODAY).waiting).toBe(true)
+  })
+
+  it('a workout dated years ahead does not park the next pass on that date', () => {
+    // The app refuses a future date, so this came from a device whose calendar is wrong. Read as
+    // the day the pass was last credited, it started the next pass the day after it, and the
+    // rotation had nothing to do until then.
+    const last = w('c', TODAY)
+    const stray = w('a', '2099-01-01', Date.parse('2099-01-01T10:00:00'))
+    const s = managed(['a', 'b', 'c'], [stray, w('b', '2026-09-11'), last])
+    expect(refillAfter(s, last, TODAY, NOW)).toBe(true)
+    expect(s.queue.startsOn).toBe('2026-09-13')   // the day after today's finish, not 2099-01-02
+    // …and it does not arrive credited either (the DONE RULE stops at today)
+    expect(queueRemaining(s, TODAY)).toEqual(['a', 'b', 'c'])
+    // with every crediting workout dated that far ahead, the next pass starts today, as an edit's does
+    const later = ['a', 'b', 'c'].map(id => w(id, '2099-01-01', Date.parse('2099-01-01T10:00:00')))
+    const all = managed(['a', 'b', 'c'], later)
+    expect(refillAfter(all, later[2], TODAY, NOW)).toBe(true)
+    expect(all.queue.startsOn).toBe(TODAY)
+  })
+
+  it('a workout dated tomorrow, from a device in a time zone ahead, still sets the boundary', () => {
+    // A day of slack: the next pass starts after it, so that workout never counts for both passes.
+    const ahead = w('a', '2026-09-13', NOW - 3600000)
+    const s = managed(['a', 'b', 'c'], [ahead, w('b', '2026-09-11'), w('c', TODAY)])
+    expect(refillAfter(s, s.workouts[2], TODAY, NOW)).toBe(true)
+    expect(s.queue.startsOn).toBe('2026-09-14')
+    expect(queueRemaining(s, '2026-09-14')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('nor does the refill after a sync merge (refillIfComplete), or an edit that completes the pass', () => {
+    const stray = w('a', '2099-01-01', Date.parse('2099-01-01T10:00:00'))
+    const merged = managed(['a', 'b', 'c'], [stray, w('b', '2026-09-11'), w('c', TODAY)])
+    expect(refillIfComplete(merged, TODAY, NOW)).toBe(true)
+    expect(merged.queue.startsOn).toBe('2026-09-13')
+    expect(merged.queue.ids).toEqual(['a', 'b', 'c'])   // closed by today's C, not by the stray A
+    const edited = managed(['a', 'b', 'c'], [stray, w('b', '2026-09-11'), w('c', TODAY)])
+    saveRotation(edited, ['a', 'b', 'c'], 'My split', TODAY, NOW)
+    expect(edited.queue.startsOn).toBe('2026-09-13')
   })
 })
 
@@ -336,7 +376,7 @@ describe('the finished-workout boundary', () => {
     // Nothing is due until tomorrow — not because both sessions happen to read as already done
     // (the masked bug: `since` landing exactly on a same-day workout's own `start`), but because
     // the pass has not started yet.
-    expect(queueRemaining(s)).toEqual(['a', 'b'])
+    expect(queueRemaining(s, TODAY)).toEqual(['a', 'b'])
     expect(queueView(s, TODAY).waiting).toBe(true)
     expect(s.dayPlan).toEqual({})
   })
@@ -403,5 +443,110 @@ describe('a complete managed pass left behind by a sync merge', () => {
     const planner = managed(['a', 'b', 'c'], [w('a', '2026-09-10'), w('b', '2026-09-11'), w('c', TODAY)], { queue: pass(['a', 'b', 'c']) })
     expect(refillIfComplete(planner, TODAY, NOW)).toBe(false)
     expect(refillIfComplete(S(), TODAY, NOW)).toBe(false)
+  })
+})
+
+// #536: a loop may hold a routine twice and rest days. It runs as segments, each a pass of the
+// queue as before (so queue.js and the reminders' api/queue.js are untouched); a rest pushes the
+// next segment's start back by a day.
+describe('rest days and repeats (#536)', () => {
+  const loop = (sequence, { rotation, ...over } = {}) => S({ scheduleMode: 'rotation', ...over, rotation: { id: 'r1', sequence, label: 'Loop', ...rotation } })
+
+  it('splits a loop at rests and at a routine already in the segment, wrapping round the end', () => {
+    const seq = ['a', 'b', 'c', REST, 'b', 'a', REST, REST]
+    expect(segmentAt(seq, 0)).toEqual({ start: 0, ids: ['a', 'b', 'c'], rest: 1, next: 4 })
+    expect(segmentAt(seq, 4)).toEqual({ start: 4, ids: ['b', 'a'], rest: 2, next: 0 })
+    expect(segmentAt(['a', 'b', 'c', 'b', 'a'], 0).ids).toEqual(['a', 'b', 'c'])
+    expect(segmentAt(['a', 'b', 'c', 'b', 'a'], 3)).toEqual({ start: 3, ids: ['b', 'a'], rest: 0, next: 0 })
+    expect(segmentAt([REST, 'a', 'b'], 0)).toEqual({ start: 1, ids: ['a', 'b'], rest: 1, next: 1 })
+    expect(segmentAt(['a', 'a'], 0)).toEqual({ start: 0, ids: ['a'], rest: 0, next: 1 })
+    expect(segmentAt([REST], 0)).toBeNull()
+  })
+
+  it('a loop without rests or repeats is simple, and runs exactly as before', () => {
+    expect(isSimpleSequence(['a', 'b', 'c'])).toBe(true)
+    expect(isSimpleSequence(['a', 'b', 'a'])).toBe(false)
+    expect(isSimpleSequence(['a', REST, 'b'])).toBe(false)
+  })
+
+  it('keeps repeats and rests of routines that exist, and drops deleted ones', () => {
+    expect(sequenceOf(loop(['a', 'gone', REST, 'a']))).toEqual(['a', REST, 'a'])
+    expect(sequenceOf(loop([REST, 'gone']))).toEqual([])
+  })
+
+  it('saving a loop with a repeat makes the first segment the pass, and keeps the whole loop', () => {
+    const s = S()
+    saveRotation(s, ['a', 'b', 'c', 'b'], '', TODAY, NOW)
+    expect(s.rotation.sequence).toEqual(['a', 'b', 'c', 'b'])
+    expect(s.rotation.at).toBe(0)
+    expect(s.queue).toMatchObject({ ids: ['a', 'b', 'c'], startsOn: TODAY, since: NOW, rotationId: s.rotation.id })
+    expect(queueNext(s, TODAY, TODAY)).toBe('a')
+  })
+
+  it('the second B is a session of its own: done in the next segment, not by the first B', () => {
+    const s = loop(['a', 'b', 'c', 'b', 'own'], { rotation: { at: 0 } })
+    startPass(s, '2026-09-10', NOW - 3 * 86400000)
+    const days = ['2026-09-10', '2026-09-11', '2026-09-12']
+    s.workouts = [w('a', days[0], NOW - 3 * 86400000 + 1000), w('b', days[1], NOW - 2 * 86400000), w('c', days[2], NOW - 1000)]
+    expect(refillAfter(s, s.workouts[2], TODAY, NOW)).toBe(true)
+    expect(s.rotation.at).toBe(3)
+    expect(s.queue).toMatchObject({ ids: ['b', 'own'], startsOn: '2026-09-13' })
+    expect(queueRemaining(s)).toEqual(['b', 'own'])
+    expect(queueNext(s, '2026-09-13', '2026-09-13')).toBe('b')
+  })
+
+  it('a rest day after a segment: the next one starts a day later, and the day in between has no session', () => {
+    const s = loop(['a', 'b', REST, 'c'], { rotation: { at: 0 } })
+    startPass(s, '2026-09-11', NOW - 2 * 86400000)
+    s.workouts = [w('a', '2026-09-11', NOW - 2 * 86400000 + 1000), w('b', TODAY)]
+    expect(refillAfter(s, s.workouts[1], TODAY, NOW)).toBe(true)
+    expect(s.queue).toMatchObject({ ids: ['c'], startsOn: '2026-09-14' })
+    expect(queueView(s, '2026-09-13').waiting).toBe(true)
+    expect(queueNext(s, '2026-09-13', '2026-09-13')).toBeNull()
+    expect(effectiveRoutineIds(s, '2026-09-13', '2026-09-13')).toEqual([])
+    expect(queueNext(s, '2026-09-14', '2026-09-14')).toBe('c')
+    // and round the end: the rest before 'c' was the only one, so 'a, b' follow 'c' straight away
+    s.workouts.push(w('c', '2026-09-14', NOW + 2 * 86400000))
+    expect(refillAfter(s, s.workouts.at(-1), '2026-09-14', NOW + 2 * 86400000)).toBe(true)
+    expect(s.queue).toMatchObject({ ids: ['a', 'b'], startsOn: '2026-09-15' })
+  })
+
+  it('two rest days in a row push it two days', () => {
+    const s = loop(['a', REST, REST, 'b'], { rotation: { at: 0 } })
+    startPass(s, TODAY, NOW - 1000)
+    s.workouts = [w('a', TODAY, NOW)]
+    expect(refillAfter(s, s.workouts[0], TODAY, NOW + 1)).toBe(true)
+    expect(s.queue).toMatchObject({ ids: ['b'], startsOn: '2026-09-15' })
+  })
+
+  it('an edit keeps the running segment and what was logged in it', () => {
+    const s = loop(['a', 'b', REST, 'c'], { rotation: { at: 0 } })
+    startPass(s, '2026-09-11', NOW - 86400000)
+    s.workouts = [w('a', '2026-09-11', NOW - 86400000 + 1000)]
+    saveRotation(s, ['a', 'b', 'own', REST, 'c', 'a'], 'Loop', TODAY, NOW)
+    expect(s.queue).toMatchObject({ ids: ['a', 'b', 'own'], startsOn: '2026-09-11', since: NOW - 86400000 })
+    expect(queueRemaining(s)).toEqual(['b', 'own'])
+    expect(s.rotation.sequence).toEqual(['a', 'b', 'own', REST, 'c', 'a'])
+  })
+
+  it('a refill only takes a pass that is the segment at `at`; a mismatch waits for the editor', () => {
+    const s = loop(['a', 'b', REST, 'c'], { rotation: { at: 0 }, queue: pass(['c'], { rotationId: 'r1', startsOn: TODAY, since: NOW - 1 }) })
+    s.workouts = [w('c', TODAY, NOW)]
+    expect(refillAfter(s, s.workouts[0], TODAY, NOW + 1)).toBe(false)
+  })
+
+  it('Start the loop over begins at the first segment, strict', () => {
+    const s = loop(['a', 'b', REST, 'c'], { rotation: { at: 3 } })
+    startPass(s, TODAY, NOW)
+    expect(s.queue.ids).toEqual(['c'])
+    startNewPass(s, TODAY, NOW + 5)
+    expect(s.rotation.at).toBe(0)
+    expect(s.queue).toMatchObject({ ids: ['a', 'b'], strict: true })
+  })
+
+  it('a loop of only rests and deleted routines starts nothing', () => {
+    const s = loop([REST, 'gone'])
+    expect(startPass(s, TODAY, NOW)).toBe(false)
+    expect(s.queue).toBeNull()
   })
 })

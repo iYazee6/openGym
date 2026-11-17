@@ -3,10 +3,10 @@
   "name": "side plank pull",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "abdominals",
+    "rear delts",
     "glutes"
   ],
   "category": "isometric",

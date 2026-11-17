@@ -3,10 +3,11 @@
   "name": "cable seated high row v. 3",
   "bodyPart": "back",
   "equipment": "cable",
-  "target": "upper back",
+  "target": "lats",
   "secondaryMuscles": [
+    "upper back",
     "rhomboids",
-    "rear deltoids",
+    "rear delts",
     "biceps",
     "trapezius"
   ],

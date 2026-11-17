@@ -3,11 +3,11 @@
   "name": "bodyweight windmill",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "hamstrings",
-    "shoulders",
+    "front delts",
     "lower back"
   ],
   "category": "mobility",

@@ -3,10 +3,10 @@
   "name": "cable high row with chest support",
   "bodyPart": "back",
   "equipment": "cable",
-  "target": "upper back",
+  "target": "lats",
   "secondaryMuscles": [
-    "lats",
-    "rear deltoids",
+    "upper back",
+    "rear delts",
     "biceps",
     "rhomboids"
   ],

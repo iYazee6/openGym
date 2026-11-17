@@ -3,15 +3,16 @@
   "name": "dumbbell suitcase carry",
   "bodyPart": "upper legs",
   "equipment": "dumbbell",
-  "target": "glutes",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "glutes",
     "core",
     "forearms",
     "grip muscles",
     "trapezius"
   ],
   "category": "strength",
+  "track": "distance",
   "description": "Carrying one heavy dumbbell at your side like a suitcase. It challenges your grip and forces your trunk to resist leaning.",
   "instructions": [
     "Pick up one dumbbell with a tall, braced posture and hold it at your side.",

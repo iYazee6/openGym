@@ -19,6 +19,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  *   await RestAlert.schedule({ id, at, title, sound, tone, classic, vibrate, channelId, visibility, importance, localOnly });
  *   await RestAlert.cancel({ id });
  *   await RestAlert.buzz({ pattern: [200, 100, 200] });   // navigator.vibrate's shape, as an alarm
+ *   await RestAlert.speak({ text, lang, rate, pitch, voice, flush });   // a spoken cue, music ducks (SpeechCue)
+ *   await RestAlert.voices();                            // { voices: [{ id, name, lang, online }] }
+ *   await RestAlert.hush();
  */
 @CapacitorPlugin(name = "RestAlert")
 public class RestAlertPlugin extends Plugin {
@@ -70,7 +73,7 @@ public class RestAlertPlugin extends Plugin {
             call.reject("at must be in the future");
             return;
         }
-        RestAlert.setAccentColor((int) number(call, "accent", 0xFF30D158L), (int) number(call, "ink", 0xFF000000L));
+        RestAlert.setAccentColor((int) number(call, "accent", 0xFFA3E635L), (int) number(call, "ink", 0xFF0C0E12L));
         RestAlert.setLabels(
                 call.getString("pause", "Pause"),
                 call.getString("resume", "Resume"),
@@ -93,7 +96,11 @@ public class RestAlertPlugin extends Plugin {
                 call.getString("importance", "high"),
                 Boolean.TRUE.equals(call.getBoolean("localOnly", Boolean.FALSE)),
                 call.getString("countdownTitle", "Rest"),
-                number(call, "totalMs", 0)
+                number(call, "totalMs", 0),
+                // Timed holds that run themselves: the alerts after this one, and whether this one
+                // shows the rest's countdown card (a count-in or a hold does not).
+                cuesOf(call),
+                !Boolean.FALSE.equals(call.getBoolean("countdown", Boolean.TRUE))
         );
         call.resolve();
     }
@@ -134,7 +141,73 @@ public class RestAlertPlugin extends Plugin {
             call.reject("no context");
             return;
         }
+        // `at`: the end of the rest or hold this tone is for. When the alarm already rang it (the
+        // page thawed after a lock or an app switch and caught up), once is enough (#1007).
+        long at = number(call, "at", 0);
+        if (at > 0 && !RestAlert.claimForPage(at)) {
+            JSObject res = new JSObject();
+            res.put("skipped", true);
+            call.resolve(res);
+            return;
+        }
         RestAlert.playNow(ctx.getApplicationContext(), call.getString("kind", "chime"));
+        call.resolve();
+    }
+
+    /**
+     * A spoken cue in the phone's voice (lib/spoken-cues.js): { text, lang, rate, flush }. Music
+     * ducks for it and comes back up (SpeechCue). Rejected when the phone has no voice to use.
+     */
+    @PluginMethod
+    public void speak(PluginCall call) {
+        Context ctx = getContext();
+        String text = call.getString("text", "");
+        if (ctx == null || text == null || text.isEmpty()) {
+            call.reject("nothing to say");
+            return;
+        }
+        Double rate = call.getDouble("rate");
+        Double pitch = call.getDouble("pitch");
+        boolean ok = SpeechCue.speak(ctx, text, call.getString("lang", ""), rate == null ? 1f : rate.floatValue(),
+                pitch == null ? 1f : pitch.floatValue(), call.getString("voice", ""), Boolean.TRUE.equals(call.getBoolean("flush", false)));
+        if (ok) call.resolve();
+        else call.reject("no voice");
+    }
+
+    /**
+     * The phone's voices for Settings → Timer alerts → Voice: { voices: [{ id, name, lang, online }] }.
+     * `id` is the voice's name, which speak({ voice }) takes back. Voices whose language data is not
+     * installed are left out: they would say nothing.
+     */
+    @PluginMethod
+    public void voices(PluginCall call) {
+        Context ctx = getContext();
+        if (ctx == null) {
+            call.reject("no context");
+            return;
+        }
+        SpeechCue.voices(ctx, list -> {
+            JSArray out = new JSArray();
+            for (android.speech.tts.Voice v : list) {
+                try {
+                    if (v.getFeatures() != null && v.getFeatures().contains(android.speech.tts.TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)) continue;
+                    JSObject o = new JSObject();
+                    o.put("id", v.getName());
+                    o.put("name", v.getName());
+                    o.put("lang", v.getLocale() == null ? "" : v.getLocale().toLanguageTag());
+                    o.put("online", v.isNetworkConnectionRequired());
+                    out.put(o);
+                } catch (Exception ignored) { /* a voice that cannot describe itself */ }
+            }
+            JSObject res = new JSObject();
+            res.put("voices", out);
+            call.resolve(res);
+        });
+    }
+
+    @PluginMethod
+    public void hush(PluginCall call) {
+        SpeechCue.hush();
         call.resolve();
     }
 
@@ -173,8 +246,8 @@ public class RestAlertPlugin extends Plugin {
 
     @PluginMethod
     public void setAccent(PluginCall call) {
-        int color = (int) number(call, "accent", 0xFF30D158L);
-        int ink = (int) number(call, "ink", 0xFF000000L);
+        int color = (int) number(call, "accent", 0xFFA3E635L);
+        int ink = (int) number(call, "ink", 0xFF0C0E12L);
         RestAlert.setAccentColor(color, ink);
         Context ctx = getContext();
         if (ctx != null) {
@@ -185,6 +258,13 @@ public class RestAlertPlugin extends Plugin {
             try { ctx.startService(i); } catch (Exception ignored) { /* no rest running */ }
         }
         call.resolve();
+    }
+
+    /** The `cues` array ({ dt, title }) as JSON for the alarm's intent, or "" for none. */
+    private static String cuesOf(PluginCall call) {
+        JSArray cues = call.getArray("cues");
+        if (cues == null || cues.length() == 0) return "";
+        return cues.toString();
     }
 
     // PluginCall.getLong only accepts a Long, and a JS timestamp often arrives as a Double

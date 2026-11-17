@@ -7,16 +7,26 @@
 // The app build (MOBILE) decodes with @capacitor-mlkit/barcode-scanning (Apache-2.0, see
 // NOTICE.md), dynamic-imported so it never lands in the web bundle. In a browser — the PWA on a
 // phone is the common case — photo import goes through lib/scan-web.js (BarcodeDetector where the
-// browser has one, jsQR otherwise). scanCode() itself is app-only: ML Kit brings its own camera
+// browser has one, jsQR and lib/barcode.js otherwise). scanCode() itself is app-only: ML Kit brings its own camera
 // UI, the browser path is a React sheet and lives with the view.
+// The F-Droid build has no ML Kit (Google's, closed source; app/build.gradle leaves the plugin
+// out), so there the app takes the browser's way for both: webScanner() says which.
 //
 // What comes back is a normalized { value, fmt } (or null when the user cancels / nothing was
 // found). `value` is the code's machine-readable content; `fmt` is a lower-cased symbology token
 // matching lib/qr.js's normalizeFmt. The caller checks canRenderFmt(fmt) before saving — we can
-// read many barcode kinds but only redraw QR, so a non-QR code is reported and refused there, not
-// silently stored.
+// read many barcode kinds but only redraw QR and a few 1D ones, so any other code is reported and
+// refused there, not silently stored.
 import { MOBILE } from './mobile.js'
 import { normalizeFmt } from './qr.js'
+import { nativeScanner } from './channel.js'
+
+/** True where scanning goes the browser's way (CameraScan + lib/scan-web.js): the web, and the
+ *  F-Droid build, which has no ML Kit. */
+export async function webScanner() {
+  if (!MOBILE) return true
+  try { return !(await nativeScanner()) } catch { return false }
+}
 
 // A found barcode from either path → our stored shape. mlkit gives rawValue (machine-readable,
 // what a turnstile actually reads) and a BarcodeFormat; we keep rawValue and fold the format.
@@ -31,7 +41,7 @@ function toCode(barcode) {
 // have to host); on iOS the plugin's native scanner. Returns the first barcode found, or null if
 // the user backed out without scanning. Throws if scanning isn't supported or permission is hard-
 // denied so the caller can explain why.
-export async function scanCode() {
+export async function scanCode(opts = {}) {
   if (!MOBILE) throw new Error('Scanning is only available in the app')
   const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning')
 
@@ -39,7 +49,7 @@ export async function scanCode() {
   if (!supported) throw new Error('unsupported')
 
   await ensureCameraPermission(BarcodeScanner)
-  await ensureScannerModule(BarcodeScanner)
+  await ensureScannerModule(BarcodeScanner, opts.moduleWaitMs)
 
   const { barcodes } = await BarcodeScanner.scan()
   return barcodes && barcodes.length ? toCode(barcodes[0]) : null
@@ -51,7 +61,7 @@ export async function scanCode() {
 // path, decode, then delete the temp file. Returns the first barcode, or null if none was found.
 export async function importCodeFromImage(file) {
   if (!file) return null
-  if (!MOBILE) return (await import('./scan-web.js')).importCodeFromImageWeb(file)
+  if (await webScanner()) return (await import('./scan-web.js')).importCodeFromImageWeb(file)
   const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning')
   const { Filesystem, Directory } = await import('@capacitor/filesystem')
 
@@ -82,14 +92,28 @@ async function ensureCameraPermission(BarcodeScanner) {
 
 // On Android the ML Kit scanner ships as an on-demand Google Play module, absent on first use.
 // Install it (once) before scanning; a no-op / not-applicable on iOS, where the check simply
-// reports available. Failures here are non-fatal — scan() will surface a clearer error if it
+// reports available. Failures to ask are non-fatal — scan() will surface a clearer error if it
 // truly can't proceed.
-async function ensureScannerModule(BarcodeScanner) {
-  try {
-    if (!BarcodeScanner.isGoogleBarcodeScannerModuleAvailable) return
-    const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable()
-    if (!available) await BarcodeScanner.installGoogleBarcodeScannerModule()
-  } catch (e) { /* let scan() decide whether it can still run */ }
+async function ensureScannerModule(BarcodeScanner, ms = MODULE_WAIT_MS) {
+  if (!BarcodeScanner.isGoogleBarcodeScannerModuleAvailable) return
+  // Play services answers these through a module download that can hang for good (no Play Store,
+  // a download that never starts: QA66 on the emulator). Without a deadline the tap did nothing
+  // and the check-in's Scan button stayed greyed out. Unknown counts as there: scan() decides.
+  let available = true
+  try { ({ available } = await withinMs(BarcodeScanner.isGoogleBarcodeScannerModuleAvailable(), ms)) } catch { return }
+  if (available) return
+  try { await withinMs(BarcodeScanner.installGoogleBarcodeScannerModule(), ms) } catch { /* still on its way */ }
+  try { ({ available } = await withinMs(BarcodeScanner.isGoogleBarcodeScannerModuleAvailable(), ms)) } catch { available = false }
+  // Not there yet: the caller scans the browser's way (CameraScan) instead of waiting on Google.
+  if (!available) throw new Error(MODULE_MISSING)
+}
+
+/** scanCode() threw this: Google's scanner isn't on the phone (yet); scan with CameraScan instead. */
+export const MODULE_MISSING = 'module-missing'
+const MODULE_WAIT_MS = 6000
+function withinMs (p, ms) {
+  let tm
+  return Promise.race([Promise.resolve(p), new Promise((_, rej) => { tm = setTimeout(() => rej(new Error('timeout')), ms) })]).finally(() => clearTimeout(tm))
 }
 
 // A File/Blob → bare base64 (no data: prefix), which Filesystem.writeFile expects.

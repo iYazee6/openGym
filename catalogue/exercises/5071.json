@@ -3,10 +3,10 @@
   "name": "kettlebell single arm overhead lunge",
   "bodyPart": "upper legs",
   "equipment": "kettlebell",
-  "target": "quads",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
-    "shoulders",
+    "quadriceps",
+    "front delts",
     "core",
     "hamstrings"
   ],

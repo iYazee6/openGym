@@ -1,0 +1,4 @@
+<drawables>
+    <!-- The logo mark (assets/logo/opengym-mark.svg), brand green on clear. The compiler scales it to each watch. -->
+    <bitmap id="LauncherIcon" filename="launcher_icon.png" />
+</drawables>

@@ -5,9 +5,12 @@
   "equipment": "dumbbell",
   "target": "triceps",
   "secondaryMuscles": [
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "Alternating dumbbell triceps extensions while lying down. It isolates each arm in turn.",
   "instructions": [
     "Lie flat on a bench with a dumbbell in each hand, palms facing each other.",

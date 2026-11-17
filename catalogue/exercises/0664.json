@@ -3,9 +3,10 @@
   "name": "push-up to side plank",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "shoulders",
+    "abdominals",
+    "front delts",
     "chest",
     "triceps"
   ],

@@ -57,8 +57,17 @@ function swipe(target, x0, x1) {
 }
 const undo = () => act(() => useUI.getState().runToastAction())
 
+// happy-dom 20.12+ runs Element.animate on its own clock, which fake timers do not move, so the
+// row's collapse never finished: end each animation on the faked clock instead.
+const fakeAnimate = () => vi.spyOn(Element.prototype, 'animate').mockImplementation(function (_, o) {
+  const a = { onfinish: null, cancel: () => clearTimeout(t) }
+  const t = setTimeout(() => a.onfinish?.(), o?.duration || 0)
+  return a
+})
+
 beforeEach(() => {
   vi.useFakeTimers()
+  fakeAnimate()
   nav.mockClear(); confirmSheet.mockClear()
   document.documentElement.dir = 'ltr'
   useUI.setState({ sheets: [], toastMsg: '', toastAction: null })
@@ -67,10 +76,11 @@ beforeEach(() => {
 })
 afterEach(() => {
   closeOpenRow(true)
-  act(() => root.unmount()); host.remove()
+  if (root) { act(() => root.unmount()); host.remove(); root = host = null }   // restoreRoutine's tests mount nothing
   localStorage.removeItem('gym_plan_view')
   widthSpy.mockRestore()
   vi.clearAllTimers(); vi.useRealTimers()
+  vi.mocked(Element.prototype.animate).mockRestore?.()
 })
 
 describe('the routines list', () => {
@@ -253,7 +263,7 @@ describe('the loop', () => {
   it('the edit-mode minus has the same Undo, and weekday rows never swipe', () => {
     mount('schedule', { ...clone(loop), week: { 1: ['c'], 2: ['a'] } })
     click([...host.querySelectorAll('.plan-textbtn')].find(b => b.textContent === 'Edit'))
-    click(host.querySelector('button[aria-label="Remove Legs"]'))
+    click(host.querySelector('button.plan-minus[aria-label="Remove Legs"]'))
     expect(S().queue.ids).toEqual(['a', 'b'])
     undo()
     expect(S().queue.ids).toEqual(['a', 'b', 'c'])

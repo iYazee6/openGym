@@ -3,7 +3,7 @@
   "name": "strongman crucifix hold",
   "bodyPart": "shoulders",
   "equipment": "weight plate",
-  "target": "delts",
+  "target": "front delts",
   "secondaryMuscles": [
     "upper back",
     "forearms",
@@ -11,6 +11,7 @@
     "core"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "Holding weights out to your sides at shoulder height, building shoulder endurance.",
   "instructions": [
     "Pick up a weight in each hand and stand tall.",

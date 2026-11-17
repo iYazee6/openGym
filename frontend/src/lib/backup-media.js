@@ -17,16 +17,23 @@
  * A backup file is someone else's data as much as a plan file is: the imported state's media refs
  * and links go through the same gates as everywhere else (sanitizeCustomMedia).
  */
+import { dropBrokenRows } from './backup-sane.js'
 import { zipStore, readZip, looksLikeZip } from './zip.js'
 import { referencedFiles, normalizeMediaRef, workoutMediaOf, cleanUrl, MEDIA_MIMES } from './media-refs.js'
 import { sniffKind } from './media-sniff.js'
 import { sha256Hex } from './sha256.js'
 import { mediaStore } from './media-store.js'
+import { setVideosOf } from './set-videos.js'
 import { DEFAULT_LIMITS, MB } from './media-limits.js'
 import { t } from './i18n-core.js'
+import { sanitizeAvatar } from './avatar.js'
+
+// The server's default cap for a sound of one's own (api/media.js MEDIA_AUDIO_MAX_MB).
+const AUDIO_MB = 2
 
 export const BACKUP_JSON = 'opengym-backup.json'
-const MEDIA_ENTRY = /^media\/([0-9a-f]{64})\.(jpg|png|webp|gif|mp4|mov|webm)$/
+// .wav: a sound of one's own (lib/user-sounds.js), exported since v1.4.5 but read back only now.
+const MEDIA_ENTRY = /^media\/([0-9a-f]{64})\.(jpg|png|webp|gif|mp4|mov|webm|wav)$/
 
 const README = `openGym backup with photos and videos
 =====================================
@@ -41,7 +48,7 @@ Do not unpack and re-zip it: the app reads zips that are stored, not compressed.
 `
 
 /** The media refs and links of an imported state — each custom exercise's picture and link, each
- *  logged workout's photos and videos — kept only where they pass the same checks as anywhere
+ *  logged workout's photos and videos, each set's form video — kept only where they pass the same checks as anywhere
  *  else (a workout's list also deduplicated, but not capped: workoutMediaOf caps what shows);
  *  the rest of the state is left as it is. Mutates and returns it. */
 export function sanitizeCustomMedia(state) {
@@ -51,12 +58,23 @@ export function sanitizeCustomMedia(state) {
     if ('url' in c) { const u = cleanUrl(c.url); if (u) c.url = u; else delete c.url }
   }
   for (const w of Array.isArray(state?.workouts) ? state.workouts : []) {
-    if (!w || typeof w !== 'object' || !('media' in w)) continue
+    if (!w || typeof w !== 'object') continue
+    // A set's form video (lib/set-videos.js): the same checks, one video per set.
+    for (const e of Array.isArray(w.entries) ? w.entries : []) {
+      for (const st of Array.isArray(e?.sets) ? e.sets : []) {
+        if (!st || typeof st !== 'object' || !('media' in st)) continue
+        const v = setVideosOf(st)
+        if (v.length) st.media = v; else delete st.media
+      }
+    }
+    if (!('media' in w)) continue
     // Every ref that passes, not only the ones shown: a file with more than the cap keeps them
     // all, and the workout shows the first WORKOUT_MEDIA_MAX as it would anywhere else.
     const list = workoutMediaOf(w, Infinity)
     if (list.length) w.media = list; else delete w.media
   }
+  // The profile picture (lib/avatar.js): a well-formed image ref or a known preset, else none.
+  sanitizeAvatar(state)
   return state
 }
 
@@ -122,7 +140,8 @@ export async function readBackupFile(file) {
     state = JSON.parse(await file.text())
     if (!isBackup(state)) throw notBackup()
   }
-  return { state: sanitizeCustomMedia(state), files, zip }
+  // Rows no screen can read (a null among the workouts) stay out: lib/backup-sane.js.
+  return { state: sanitizeCustomMedia(dropBrokenRows(state).state), files, zip }
 }
 
 /**
@@ -132,7 +151,7 @@ export async function readBackupFile(file) {
  */
 export async function storeBackupMedia(files, { media = mediaStore, limits = DEFAULT_LIMITS } = {}) {
   let stored = 0, skipped = 0
-  const cap = { image: limits.imageMB, gif: limits.gifMB, video: limits.videoMB }
+  const cap = { image: limits.imageMB, gif: limits.gifMB, video: limits.videoMB, audio: limits.audioMB || AUDIO_MB }
   for (const { hash, entry } of files) {
     try {
       const head = new Uint8Array(await entry.blob.slice(0, 64).arrayBuffer())

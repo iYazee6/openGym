@@ -6,9 +6,12 @@
   "target": "triceps",
   "secondaryMuscles": [
     "chest",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A close-grip press from a lying position. Targets the triceps with chest involvement.",
   "instructions": [
     "Lie flat on a bench with your feet flat on the ground and your back pressed against the bench.",

@@ -3,10 +3,11 @@
   "name": "suspender handstand push up",
   "bodyPart": "upper arms",
   "equipment": "suspension trainer",
-  "target": "triceps",
+  "target": "front delts",
   "secondaryMuscles": [
-    "shoulders",
-    "core"
+    "triceps",
+    "core",
+    "side delts"
   ],
   "category": "calisthenics",
   "description": "An advanced inverted press with hands on the straps, working the triceps and shoulders strongly.",

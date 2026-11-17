@@ -3,12 +3,12 @@
   "name": "cable kneeling leaning forward one arm row",
   "bodyPart": "back",
   "equipment": "cable",
-  "target": "lats",
+  "target": "upper back",
   "secondaryMuscles": [
-    "upper back",
+    "lats",
     "rhomboids",
     "biceps",
-    "rear deltoids"
+    "rear delts"
   ],
   "category": "strength",
   "description": "One-arm cable row from a kneeling position, leaning forward to give a long pull for the lats and mid back.",

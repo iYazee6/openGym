@@ -5,11 +5,12 @@
   "equipment": "body weight",
   "target": "abs",
   "secondaryMuscles": [
-    "shoulders",
+    "front delts",
     "glutes",
     "core"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A bridge hold on straight arms like the top of a push-up. It trains the abs and shoulder stability.",
   "instructions": [
     "Start in a high plank with your hands under your shoulders.",

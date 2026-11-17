@@ -3,11 +3,11 @@
   "name": "standing two side bend",
   "bodyPart": "waist",
   "equipment": "body weight",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "lats",
-    "shoulders"
+    "front delts"
   ],
   "category": "mobility",
   "description": "A standing side bend with both arms overhead for a longer reach through the trunk.",

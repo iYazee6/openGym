@@ -270,6 +270,14 @@ describe('AdminCoach — removing the stored credential (irreversible: the key i
     expect(sent('/api/admin/coach/disconnect')).toHaveLength(before + 1)
     expect(mocks.toast).toHaveBeenCalledWith('Credential removed')
   })
+
+  // The button wore `danger` as a bare prop, which Button handed to the DOM as an attribute:
+  // no red, and a React warning on every render.
+  it('the Remove button itself is red, like every other destructive button', async () => {
+    await mount()
+    expect(btn('Remove').classList.contains('danger')).toBe(true)
+    expect(btn('Remove').hasAttribute('danger')).toBe(false)
+  })
 })
 
 describe('AdminCoach — switching provider', () => {
@@ -301,7 +309,7 @@ describe('AdminCoach — the connection test', () => {
     expect(host.textContent).toContain('Asking the provider…')
     await act(async () => { release(); await new Promise(r => setTimeout(r, 0)) })
     expect(host.textContent).toContain('Passed')
-    expect(mocks.toast).toHaveBeenCalledWith('Coach test passed ✅')
+    expect(mocks.toast).toHaveBeenCalledWith('Coach test passed')
   })
 
   it('a provider refusal keeps its own reason on screen, where the toast cannot outrun it', async () => {
@@ -510,9 +518,17 @@ describe('AdminCoach — daily caps (what bounds the spend on the operator\'s ac
   it('the community-medians switch is a separate write and does not carry the caps with it', async () => {
     await mount()
     const switches = [...host.querySelectorAll('[role="switch"]')]
-    expect(switches).toHaveLength(2)
+    // the card's on/off, community medians, web research (coach-146)
+    expect(switches).toHaveLength(3)
     await tap(switches[1])
     expect(sent('/api/admin/coach/config')[0].body).toEqual({ community: true })
+  })
+
+  it('web research is its own switch and write (coach-146)', async () => {
+    await mount()
+    const switches = [...host.querySelectorAll('[role="switch"]')]
+    await tap(switches[2])
+    expect(sent('/api/admin/coach/config')[0].body).toEqual({ web: true })
   })
 })
 
@@ -575,7 +591,7 @@ describe('AdminCoach — Claude Code setup token sheet', () => {
     await openToken()
     await blurWith(sheetFields()[0], 'sk-ant-oat-secret')
     await tap(sheetBtn('Save token'))
-    expect(mocks.toast).toHaveBeenLastCalledWith('Connected ✅')
+    expect(mocks.toast).toHaveBeenLastCalledWith('Connected')
   })
 
   // The sheet clears `busy` only by going away: the success path closes instead of resetting it.
@@ -612,7 +628,7 @@ describe('AdminCoach — API key sheet', () => {
     await openKey()
     await blurWith(sheetFields()[0], 'sk-good')
     await tap(sheetBtn('Save key'))
-    expect(mocks.toast).toHaveBeenLastCalledWith('Key saved ✅')
+    expect(mocks.toast).toHaveBeenLastCalledWith('Key saved and tested')
   })
 
   it('a refused key keeps the sheet open and the key in the box', async () => {

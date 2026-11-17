@@ -3,11 +3,11 @@
   "name": "weighted plate overhead reverse lunge",
   "bodyPart": "upper legs",
   "equipment": "weight plate",
-  "target": "quads",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
+    "quadriceps",
     "hamstrings",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "strength",

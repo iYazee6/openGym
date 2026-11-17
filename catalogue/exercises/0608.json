@@ -3,9 +3,10 @@
   "name": "lever twist",
   "bodyPart": "waist",
   "equipment": "leverage machine",
-  "target": "abs",
+  "machineKind": "ab-machine",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
+    "abdominals",
     "lower back"
   ],
   "category": "strength",

@@ -110,3 +110,100 @@ describe('MuscleExplorer search: the × and live count the Library has (#338)', 
     expect(clear()).toBeNull()
   })
 })
+
+// #553: Stats' untrained muscles open the explorer on that muscle.
+describe('MuscleExplorer opened on a muscle', () => {
+  it('starts with it chosen and its exercises listed', () => {
+    const host = render({ initial: 'biceps', onDetail: vi.fn() })
+    expect(isOn(muscleChip(host, 'Biceps'))).toBe(true)
+    expect(host.textContent).toContain('Exercises for Biceps')
+  })
+})
+
+// #669: the Add exercise picker's "By muscle" lost the Favourites chip its list view has.
+describe('MuscleExplorer Favourites chip', () => {
+  it('lists the favourites that train the chosen muscle', async () => {
+    const { EXDB } = await import('../lib/exercises.js')
+    const { musclesOf } = await import('../lib/muscles.js')
+    const curl = EXDB.find(e => musclesOf(e).biceps === 1)
+    const press = EXDB.find(e => !musclesOf(e).biceps && e.bp === 'chest')
+    mocks.S.favEx = [curl.id, press.id]
+    const onPick = vi.fn()
+    const host = render({ onPick })
+    act(() => { muscleChip(host, 'Biceps').click() })
+    const fav = muscleChip(host, 'Favourites')
+    expect(fav, 'a Favourites chip next to All').toBeTruthy()
+    expect(fav.textContent).toContain('(1)')
+    act(() => { fav.click() })
+    expect(isOn(muscleChip(host, 'Favourites'))).toBe(true)
+    const rows = [...host.querySelectorAll('.list .item')]
+    expect(rows).toHaveLength(1)
+    act(() => { rows[0].querySelector('.tap-main').click() })
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: curl.id }))
+    act(() => { chipByText(host, 'All').click() })
+    expect(host.querySelectorAll('.list .item').length).toBeGreaterThan(1)
+  })
+
+  it('is not there without favourites', () => {
+    const host = render({ onPick: vi.fn() })
+    act(() => { muscleChip(host, 'Biceps').click() })
+    expect(muscleChip(host, 'Favourites')).toBeUndefined()
+  })
+})
+
+// #885, #900: several muscles at once, AND by default, and groups that open into their muscles.
+describe('MuscleExplorer with several muscles and groups', () => {
+  const rows = host => host.querySelectorAll('.list .item').length
+  const count = host => { const c = host.querySelector('.search .search-count'); return c ? Number(c.textContent.replace(/\D/g, '')) : null }
+  const groupChip = (host, name) => [...host.querySelectorAll('.mx-groups .chip')].find(b => b.textContent.trim() === name)
+  it('two muscles show what trains both, and Any of them widens it again', async () => {
+    const { allExercises } = await import('../lib/exercises.js')
+    const { musclesOf } = await import('../lib/muscles.js')
+    const both = allExercises(mocks.S).filter(e => { const w = musclesOf(e); return w.quadriceps > 0 && w.hamstring > 0 }).length
+    const host = render({ onDetail: vi.fn() })
+    act(() => { muscleChip(host, 'Quads').click() })
+    act(() => { muscleChip(host, 'Hamstrings').click() })
+    expect(host.textContent).toContain('Exercises for Quads + Hamstrings')
+    expect(isOn(muscleChip(host, 'Quads'))).toBe(true)
+    expect(isOn(muscleChip(host, 'Hamstrings'))).toBe(true)
+    // several muscles narrow the list, so the live count shows
+    expect(count(host)).toBe(both)
+    act(() => { [...host.querySelectorAll('.seg button')].find(b => b.textContent === 'Any of them').click() })
+    expect(count(host)).toBeGreaterThan(both)
+    expect(host.textContent).toContain('Exercises for Quads / Hamstrings')
+  })
+  it('a group picks all of its muscles and opens them; one of them then stands for itself', () => {
+    const host = render({ onDetail: vi.fn() })
+    act(() => { groupChip(host, 'Legs').click() })
+    expect(isOn(groupChip(host, 'Legs'))).toBe(true)
+    expect(groupChip(host, 'Legs').getAttribute('aria-expanded')).toBe('true')
+    expect(host.textContent).toContain('Exercises for Legs')
+    // the strip below holds only the legs now
+    expect(muscleChip(host, 'Biceps')).toBeUndefined()
+    expect(rows(host)).toBeGreaterThan(0)
+    act(() => { muscleChip(host, 'Calves').click() })
+    expect(isOn(groupChip(host, 'Legs'))).toBe(false)
+    expect(host.textContent).toContain('Exercises for Calves')
+    act(() => { [...host.querySelectorAll('button')].find(b => b.textContent === 'Clear selection').click() })
+    expect(host.textContent).not.toContain('Exercises for')
+  })
+})
+
+// QA 1.4.5: the per-muscle counts are tallied in one pass over the catalogue now (they asked
+// musclesOf once per muscle per exercise before: a 450 ms freeze on opening the page). Same numbers.
+describe('MuscleExplorer per-muscle counts', () => {
+  it('each muscle chip shows how many exercises train it', async () => {
+    const { allExercises } = await import('../lib/exercises.js')
+    const { MUSCLES, MUSCLE_NAME, musclesOf } = await import('../lib/muscles.js')
+    const host = render()
+    const all = allExercises(mocks.S)
+    let checked = 0
+    for (const m of MUSCLES) {
+      const chip = [...host.querySelectorAll('.chips .chip')].find(b => b.querySelector('.dim') && b.textContent.trim().startsWith(MUSCLE_NAME[m] + ' '))
+      if (!chip) continue
+      expect(Number(chip.querySelector('.dim').textContent), m).toBe(all.filter(e => musclesOf(e)[m]).length)
+      checked++
+    }
+    expect(checked).toBeGreaterThan(5)
+  })
+})

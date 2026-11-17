@@ -6,6 +6,8 @@ import { createRoot } from 'react-dom/client'
 import { DEF, useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { bwSheet, weighInsSheet } from './sheets.jsx'
+import { pickDate } from './components/DateField.test-util.js'
+import { todayISO } from './lib/format.js'
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const mounted = []
@@ -51,8 +53,11 @@ describe('weigh-ins sheet', () => {
     expect(weeks[0].textContent).toContain('Average 79.7 kg')
     expect(weeks[0].textContent).toContain('0.8')             // down from 80.5 the week before
     expect(weeks[1].textContent).toContain('Average 80.5 kg')
-    expect(weeks[0].querySelectorAll('button[aria-label="Delete weigh-in"]')).toHaveLength(3)
-    expect(weeks[1].querySelectorAll('button[aria-label="Delete weigh-in"]')).toHaveLength(2)
+    expect(weeks[0].querySelectorAll('button[aria-label^="Delete weigh-in, "]')).toHaveLength(3)
+    // Every weigh-in's bin says which one it deletes (P4): no two share a name.
+    const bins = [...host.querySelectorAll('button[aria-label^="Delete weigh-in, "]')].map(b => b.getAttribute('aria-label'))
+    expect(new Set(bins).size).toBe(bins.length)
+    expect(weeks[1].querySelectorAll('button[aria-label^="Delete weigh-in, "]')).toHaveLength(2)
   })
 
   it('follows a Sunday week start', () => {
@@ -66,7 +71,7 @@ describe('weigh-ins sheet', () => {
   it('deletes a weigh-in from the list once that is confirmed', () => {
     weighInsSheet()
     const host = mountTopSheet()
-    act(() => { host.querySelector('[data-week="2026-08-31"] button[aria-label="Delete weigh-in"]').click() })
+    act(() => { host.querySelector('[data-week="2026-08-31"] button[aria-label^="Delete weigh-in, "]').click() })
     expect(useStore.getState().S.bodyweight).toHaveLength(5)
     expect(useUI.getState().sheets).toHaveLength(2)
     const ask = mountTopSheet()
@@ -80,7 +85,7 @@ describe('weigh-ins sheet', () => {
   it('keeps the weigh-in when the question is cancelled', () => {
     weighInsSheet()
     const host = mountTopSheet()
-    act(() => { host.querySelector('[data-week="2026-08-31"] button[aria-label="Delete weigh-in"]').click() })
+    act(() => { host.querySelector('[data-week="2026-08-31"] button[aria-label^="Delete weigh-in, "]').click() })
     const ask = mountTopSheet()
     act(() => { button(ask, 'Cancel').click() })
     expect(useUI.getState().sheets).toHaveLength(1)
@@ -91,7 +96,7 @@ describe('weigh-ins sheet', () => {
   it('still deletes one of the log sheet\'s recent weigh-ins in one tap', () => {
     bwSheet()
     const log = mountTopSheet()
-    act(() => { log.querySelector('button[aria-label="Delete weigh-in"]').click() })
+    act(() => { log.querySelector('button[aria-label^="Delete weigh-in, "]').click() })
     expect(useUI.getState().sheets).toHaveLength(1)
     expect(useStore.getState().S.bodyweight).toHaveLength(4)
   })
@@ -107,7 +112,7 @@ describe('weigh-ins sheet', () => {
   it('is reached from the log sheet once there are more weigh-ins than its recent three', () => {
     bwSheet()
     const log = mountTopSheet()
-    expect(log.querySelectorAll('button[aria-label="Delete weigh-in"]')).toHaveLength(3)
+    expect(log.querySelectorAll('button[aria-label^="Delete weigh-in, "]')).toHaveLength(3)
     const all = button(log, 'All weigh-ins')
     expect(all).toBeTruthy()
     act(() => { all.click() })
@@ -117,5 +122,48 @@ describe('weigh-ins sheet', () => {
     install({ bodyweight: clone(LOG).slice(0, 2) })
     bwSheet()
     expect(button(mountTopSheet(), 'All weigh-ins')).toBeUndefined()
+  })
+})
+
+// A weigh-in can be logged for an earlier day, the way measurements can.
+describe('log sheet date', () => {
+  const setDate = (host, value) => pickDate(host.querySelector('[data-datefield]'), value)
+
+  it('logs a weigh-in for an earlier day, in date order', () => {
+    bwSheet()
+    const log = mountTopSheet()
+    setDate(log, '2026-09-05')
+    act(() => { button(log, 'Save').click() })
+    const bw = useStore.getState().S.bodyweight
+    expect(bw.map(b => b.d)).toEqual(['2026-09-01', '2026-09-03', '2026-09-05', '2026-09-07', '2026-09-09', '2026-09-13'])
+    expect(bw.find(b => b.d === '2026-09-05')).toMatchObject({ w: 79 })
+    expect(useUI.getState().sheets).toHaveLength(0)
+  })
+
+  // #859: a day can hold several weigh-ins. An earlier day starts on 08:00 when its own has no time.
+  it('adds a second weigh-in to an earlier day, at 08:00, and the day keeps its morning value', () => {
+    bwSheet()
+    const log = mountTopSheet()
+    setDate(log, '2026-09-03')
+    expect(log.querySelector('input[type="time"]').value).toBe('08:00')
+    act(() => { button(log, 'Save').click() })
+    const day = useStore.getState().S.bodyweight.find(b => b.d === '2026-09-03')
+    expect(day.ins.map(r => [r.at, r.w])).toEqual([[null, 80], ['08:00', 79]])
+    expect(day.w).toBe(80)
+    expect(useStore.getState().S.bodyweight).toHaveLength(5)
+    expect(useUI.getState().toastMsg).toBe('Weight saved')
+  })
+
+  it('does not take a day after today', () => {
+    const d = new Date(); d.setDate(d.getDate() + 1)
+    bwSheet()
+    const log = mountTopSheet()
+    expect(setDate(log, d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'))).toBe(false)
+    expect(log.querySelector('[data-datefield]').value).toBe(todayISO())
+  })
+
+  it('has no date on the weigh-in before a workout', () => {
+    bwSheet({ required: true })
+    expect(mountTopSheet().querySelector('[data-datefield]')).toBeNull()
   })
 })

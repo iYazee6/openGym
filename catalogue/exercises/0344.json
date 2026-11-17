@@ -5,9 +5,12 @@
   "equipment": "dumbbell",
   "target": "triceps",
   "secondaryMuscles": [
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "A lying one-arm triceps extension with an overhand grip. It isolates the triceps, one side at a time.",
   "instructions": [
     "Lie flat on a bench with your back and head supported, and your feet flat on the ground.",

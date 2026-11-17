@@ -3,14 +3,16 @@
   "name": "lying rear lateral raise",
   "bodyPart": "shoulders",
   "equipment": "dumbbell",
-  "target": "delts",
+  "target": "rear delts",
   "secondaryMuscles": [
-    "rear deltoids",
     "upper back",
     "rhomboids",
     "trapezius"
   ],
   "category": "strength",
+  "needs": [
+    "bench"
+  ],
   "description": "Lying face down, you raise light dumbbells out to the sides. It targets the rear shoulders and upper back.",
   "instructions": [
     "Lie face down on a bench holding a light dumbbell in each hand.",

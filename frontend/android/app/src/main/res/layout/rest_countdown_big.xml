@@ -6,6 +6,17 @@
     android:layout_height="wrap_content"
     android:orientation="vertical">
 
+    <!-- The set after the rest, while a workout card is up (WorkoutNotification.upNext). -->
+    <TextView
+        android:id="@+id/rest_next"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification"
+        android:visibility="gone" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -21,6 +32,20 @@
             android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
             android:textSize="26sp"
             android:textStyle="bold" />
+
+        <!-- Running: the system counts this down itself (no repost per second). The TextView
+             above shows the time only while paused. -->
+        <Chronometer
+            android:id="@+id/rest_chrono"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:countDown="true"
+            android:fontFeatureSettings="tnum"
+            android:minWidth="58dp"
+            android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <ProgressBar
             android:id="@+id/rest_bar"

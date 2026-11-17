@@ -3,9 +3,10 @@
   "name": "lever horizontal one leg press",
   "bodyPart": "upper legs",
   "equipment": "leverage machine",
-  "target": "glutes",
+  "machineKind": "leg-press",
+  "target": "quads",
   "secondaryMuscles": [
-    "quadriceps",
+    "glutes",
     "hamstrings",
     "calves"
   ],

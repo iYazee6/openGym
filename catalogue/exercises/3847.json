@@ -3,11 +3,10 @@
   "name": "band twist (up down)",
   "bodyPart": "waist",
   "equipment": "band",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
     "core",
-    "shoulders"
+    "front delts"
   ],
   "category": "strength",
   "description": "A diagonal twisting movement against band tension. It trains your obliques and rotational strength.",

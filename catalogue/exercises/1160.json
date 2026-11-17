@@ -1,14 +1,14 @@
 {
   "id": "1160",
   "name": "burpee",
-  "bodyPart": "cardio",
+  "bodyPart": "full body",
   "equipment": "body weight",
   "target": "cardiovascular system",
   "secondaryMuscles": [
     "quadriceps",
     "hamstrings",
     "calves",
-    "shoulders",
+    "front delts",
     "chest"
   ],
   "category": "cardio",

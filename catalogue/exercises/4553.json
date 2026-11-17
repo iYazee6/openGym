@@ -3,10 +3,10 @@
   "name": "thoracic bridge",
   "bodyPart": "back",
   "equipment": "body weight",
-  "target": "spine",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
-    "shoulders",
+    "lower back",
+    "front delts",
     "core"
   ],
   "category": "mobility",

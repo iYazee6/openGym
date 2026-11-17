@@ -3,10 +3,10 @@
   "name": "dumbbell military press russian twist with legs floor off v. 2",
   "bodyPart": "waist",
   "equipment": "dumbbell",
-  "target": "abs",
+  "target": "obliques",
   "secondaryMuscles": [
-    "obliques",
-    "shoulders",
+    "abdominals",
+    "front delts",
     "triceps",
     "hip flexors"
   ],

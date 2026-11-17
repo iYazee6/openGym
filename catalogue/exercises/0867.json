@@ -7,11 +7,12 @@
   "secondaryMuscles": [
     "hamstrings",
     "lower back",
-    "shoulders",
+    "front delts",
     "triceps",
     "core"
   ],
   "category": "isometric",
+  "hold": true,
   "description": "A plank held face up, supported on your hands and heels. It strengthens the back of the body and opens up the chest.",
   "instructions": [
     "Sit on the floor with legs straight and hands behind your hips, fingers pointing forward.",

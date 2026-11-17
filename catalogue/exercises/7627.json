@@ -3,11 +3,11 @@
   "name": "landmine overhead rear lunge",
   "bodyPart": "upper legs",
   "equipment": "landmine",
-  "target": "quads",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
+    "quadriceps",
     "hamstrings",
-    "shoulders",
+    "rear delts",
     "core"
   ],
   "category": "strength",

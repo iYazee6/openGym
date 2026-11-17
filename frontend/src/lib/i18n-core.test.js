@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   LANGS, INSTR_LANGS, EXERCISE_NAME_LANGS, DATE_LOCALES, DERIVED_LOCALES,
-  baseLang, derivePack, dateLocale, getLang, t, _setLangState, exerciseNameClass, exerciseNameFor, CASED_NAME_LANGS
+  baseLang, derivePack, dateLocale, getLang, t, _setLangState, exerciseNameClass, exerciseOwnNameClass, exerciseAsTypedClass, bindOwnExercise, exerciseNameFor, CASED_NAME_LANGS, RTL_LANGS
 } from './i18n-core.js'
 import { EXDB } from './exercises-data.js'
 import de from '../locales/de.js'
@@ -126,9 +126,30 @@ describe('exerciseNameClass', () => {
     _setLangState('de', {}, null, { '0025': 'Bankdrücken mit Langhantel' })
     expect(exerciseNameClass(bench)).toBe('')
     expect(exerciseNameClass(pushUp)).toBe('capitalize')
+    // An exercise nobody marked as the user's own is the catalogue's as far as this module knows.
     expect(exerciseNameClass(custom)).toBe('capitalize')
     expect(exerciseNameClass(undefined)).toBe('capitalize')
     _setLangState('en', {}, null, null)
+  })
+
+  // P10 (1.4.5 UX round): "am Turm" showed as "Am Turm" in the English UI. A name the user typed
+  // is shown as typed in every language; title-casing stays the catalogue's rule (#290).
+  it('never title-cases one of your own exercises', () => {
+    const own = { id: 'c1', n: 'am Turm', custom: true }
+    for (const lang of ['en', 'de', 'pt', 'fr']) {
+      _setLangState(lang, {}, null, lang === 'en' ? null : { '0025': 'x' })
+      expect(exerciseNameClass(own), lang).toBe('')
+      expect(exerciseOwnNameClass(own), lang).toBe('')
+      expect(exerciseAsTypedClass(own), lang).toBe('nocap')
+    }
+    _setLangState('en', {}, null, null)
+    expect(exerciseNameClass(bench)).toBe('capitalize')
+    expect(exerciseAsTypedClass(bench)).toBe('')
+    // whoever knows better which exercises are the user's own says so (lib/exercises.js does)
+    bindOwnExercise(ex => ex?.id === 'custom-1')
+    expect(exerciseNameClass(custom)).toBe('')
+    expect(exerciseNameClass(bench)).toBe('capitalize')
+    bindOwnExercise(ex => ex?.custom === true)
   })
 })
 
@@ -192,7 +213,9 @@ describe('English-name switches with every exercise-name pack', () => {
       _setLangState(lang, {}, null, names)
       // German keeps its own casing; a lower-case pack is title-cased like English.
       const translatedClass = CASED_NAME_LANGS.includes(lang) ? '' : 'capitalize'
-      expect(exerciseNameFor(ex)).toBe(`${names[ex.id]} (${ex.n})`)
+      // A right-to-left language isolates the English part, brackets included (exerciseNameFor).
+      const english = RTL_LANGS.has(lang) ? `\u2068(${ex.n})\u2069` : `(${ex.n})`
+      expect(exerciseNameFor(ex)).toBe(`${names[ex.id]} ${english}`)
       expect(exerciseNameClass(ex)).toBe(translatedClass)
       _setLangState(lang, {}, null, names, false)
       expect(exerciseNameFor(ex)).toBe(names[ex.id])

@@ -3,11 +3,11 @@
   "name": "celebratory knee drives",
   "bodyPart": "full body",
   "equipment": "body weight",
-  "target": "quads",
+  "target": "hip flexors",
   "secondaryMuscles": [
-    "hip flexors",
+    "quadriceps",
     "glutes",
-    "shoulders",
+    "front delts",
     "core"
   ],
   "category": "plyometrics",

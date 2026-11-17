@@ -48,7 +48,7 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
     # ingress-nginx allows 1m request bodies by default. Photo and video uploads need more:
-    nginx.ingress.kubernetes.io/proxy-body-size: 48m
+    nginx.ingress.kubernetes.io/proxy-body-size: 112m
   hosts:
     - host: gym.example.com
       paths:
@@ -128,7 +128,7 @@ longer mounted, and since Helm keeps it, delete it by hand once the new pod runs
 
 ### Images
 
-`api.image.tag` and `web.image.tag` default to `1.4.1`. Change them together: an API and a web
+`api.image.tag` and `web.image.tag` default to `1.4.3`. Change them together: an API and a web
 image from different releases aren't meant to run side by side.
 
 ### Other values

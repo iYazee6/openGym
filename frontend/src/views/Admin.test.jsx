@@ -9,7 +9,7 @@ import Admin from './Admin.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-const mocks = vi.hoisted(() => ({ answers: {}, sheets: [] }))
+const mocks = vi.hoisted(() => ({ answers: {}, sheets: [], navs: [] }))
 vi.mock('../lib/api.js', () => ({
   api: path => {
     const key = path.split('?')[0]
@@ -28,7 +28,7 @@ vi.mock('../store/useUI.js', () => {
   useUI.getState = snap
   return { useUI }
 })
-vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }))
+vi.mock('react-router-dom', () => ({ useNavigate: () => (...a) => mocks.navs.push(a), useLocation: () => ({ state: null }) }))
 vi.mock('../sheets.jsx', () => ({ confirmSheet: vi.fn() }))
 vi.mock('./AdminCoach.jsx', () => ({ default: () => null }))
 
@@ -48,6 +48,7 @@ const good = { id: 'w1', name: 'Push day', d: '2026-09-10', start: 1000, end: 61
 beforeEach(() => {
   document.body.innerHTML = ''
   mocks.sheets.length = 0
+  mocks.navs.length = 0
   mocks.answers = {
     '/api/admin/users': { users: [{ id: 'u1', name: 'Mallory', workouts: 2, lastSync: null, disabled: false }], invite_only: false },
     '/api/admin/invites': { invites: [] },
@@ -120,5 +121,55 @@ describe('Admin when the users cannot be loaded', () => {
     await settle()
     expect(text(page)).toContain('The last update failed')
     expect([...page.querySelectorAll('.item')].some(el => el.textContent.includes('Mallory'))).toBe(true)
+  })
+})
+
+// One owner, any number of admins: only the owner sees the role buttons and the log's clear.
+describe('Admin roles', () => {
+  const openMallory = async () => {
+    const page = render(<Admin />)
+    await settle()
+    act(() => [...page.querySelectorAll('.item')].find(el => el.textContent.includes('Mallory')).click())
+    const sheet = render(mocks.sheets[0](() => {}))
+    await settle()
+    return { page, buttons: [...sheet.querySelectorAll('button')].map(b => b.textContent) }
+  }
+  it('the owner can make someone an admin, and clear the log', async () => {
+    mocks.answers['/api/admin/users'].users.push({ id: 'adm', name: 'Admin', admin: true, owner: true, workouts: 0 })
+    mocks.answers['/api/admin/audit'] = { events: [], enabled: true, total: 0, retention: {} }
+    const { page, buttons } = await openMallory()
+    expect(buttons).toContain('Make admin')
+    expect(page.querySelector('[aria-label="clear log"]')).toBeTruthy()
+    expect(page.textContent).toContain('owner')
+  })
+  it('an admin who is not the owner gets neither', async () => {
+    mocks.answers['/api/admin/users'].users.push({ id: 'adm', name: 'Admin', admin: true, owner: false, workouts: 0 })
+    mocks.answers['/api/admin/audit'] = { events: [], enabled: true, total: 0, retention: {} }
+    const { page, buttons } = await openMallory()
+    expect(buttons).not.toContain('Make admin')
+    expect(buttons).toContain('Disable account')
+    expect(page.querySelector('[aria-label="clear log"]')).toBeNull()
+  })
+})
+
+// The phone opens the dashboard from Settings › Account, whose own back steps back in history.
+// A back here that pushed /settings/account sent that one straight to the dashboard again.
+describe('Admin back button', () => {
+  afterEach(() => window.history.replaceState(null, ''))
+
+  it('steps back the way it came', async () => {
+    window.history.replaceState({ idx: 2 }, '')
+    const page = render(<Admin />)
+    await settle()
+    act(() => page.querySelector('[aria-label="Back"]').click())
+    expect(mocks.navs).toEqual([[-1]])
+  })
+
+  it('opened with nothing behind it, goes up to Settings › Account', async () => {
+    window.history.replaceState({ idx: 0 }, '')
+    const page = render(<Admin />)
+    await settle()
+    act(() => page.querySelector('[aria-label="Back"]').click())
+    expect(mocks.navs).toEqual([['/settings/account', { replace: true }]])
   })
 })

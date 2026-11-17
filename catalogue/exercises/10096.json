@@ -3,10 +3,10 @@
   "name": "dumbbell rear lunge to single arm shoulders press",
   "bodyPart": "upper legs",
   "equipment": "dumbbell",
-  "target": "quads",
+  "target": "glutes",
   "secondaryMuscles": [
-    "glutes",
-    "shoulders",
+    "quadriceps",
+    "rear delts",
     "triceps",
     "hamstrings",
     "core"
